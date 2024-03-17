@@ -12,7 +12,6 @@ import (
 )
 
 const version = byte(0x00)
-const walletFile = "wallet.dat"
 const addressChecksumLen = 4
 
 // Wallet stores private and public keys
@@ -56,7 +55,7 @@ func HashPubKey(pubKey []byte) []byte {
 	return publicRIPEMD160
 }
 
-// ValidateAddress check if address if valid
+// ValidateAddress check if address is valid
 func ValidateAddress(address string) bool {
 	pubKeyHash := Base58Decode([]byte(address))
 	actualChecksum := pubKeyHash[len(pubKeyHash)-addressChecksumLen:]
