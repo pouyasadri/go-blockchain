@@ -53,11 +53,11 @@ func (ws Wallets) GetWallet(address string) Wallet {
 
 // LoadFromFile loads wallets from the file
 func (ws *Wallets) LoadFromFile() error {
-	if _, err := os.Stat(WalletFile); os.IsNotExist(err) {
+	if _, err := os.Stat(walletFile); os.IsNotExist(err) {
 		return err
 	}
 
-	fileContent, err := ioutil.ReadFile(WalletFile)
+	fileContent, err := ioutil.ReadFile(walletFile)
 	if err != nil {
 		log.Panic(err)
 	}
@@ -87,7 +87,7 @@ func (ws Wallets) SaveToFile() {
 		log.Panic(err)
 	}
 
-	err = ioutil.WriteFile(WalletFile, content.Bytes(), 0644)
+	err = ioutil.WriteFile(walletFile, content.Bytes(), 0644)
 	if err != nil {
 		log.Panic(err)
 	}
