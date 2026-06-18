@@ -5,6 +5,7 @@ import (
 
 	"github.com/pouyasadri/go-blockchain/internal/storage"
 	bolt "go.etcd.io/bbolt"
+	bolterrors "go.etcd.io/bbolt/errors"
 )
 
 const (
@@ -153,7 +154,7 @@ func (d *DB) DeleteUTXO(txID []byte) error {
 func (d *DB) ClearUTXOSet() error {
 	return d.db.Update(func(tx *bolt.Tx) error {
 		err := tx.DeleteBucket([]byte(utxoBucket))
-		if err != nil && err != bolt.ErrBucketNotFound {
+		if err != nil && err != bolterrors.ErrBucketNotFound {
 			return err
 		}
 		_, err = tx.CreateBucket([]byte(utxoBucket))
