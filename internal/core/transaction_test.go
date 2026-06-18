@@ -43,3 +43,26 @@ func TestTXInput(t *testing.T) {
 	in := TXInput{[]byte("id"), 0, nil, wallet.PublicKey}
 	assert.True(t, in.UsesKey(pubKeyHash))
 }
+
+func TestTransactionErrors(t *testing.T) {
+	wallet, _ := NewWallet()
+	txin := TXInput{Txid: []byte("parent"), Vout: 0}
+	txn := &Transaction{Vin: []TXInput{txin}}
+
+	// Test Sign returning error on invalid prevTXs
+	err := txn.Sign(wallet.PrivateKey, map[string]Transaction{})
+	assert.Error(t, err)
+
+	// Test Verify returning false on invalid prevTXs
+	valid := txn.Verify(map[string]Transaction{})
+	assert.False(t, valid)
+
+	// Test DeserializeTransaction error on bad input
+	_, err = DeserializeTransaction([]byte("invalid_data"))
+	assert.Error(t, err)
+
+	// Test DeserializeOutputs panic on bad input
+	assert.Panics(t, func() {
+		DeserializeOutputs([]byte("invalid_data"))
+	})
+}
