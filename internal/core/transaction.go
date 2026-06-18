@@ -217,19 +217,28 @@ func NewUTXOTransaction(wallet *Wallet, to string, amount int, UTXOSet *UTXOSet)
 		}
 
 		for _, out := range outs {
-			input := TXInput{txID, out, nil, wallet.PublicKey}
+			input := TXInput{
+				Txid:      txID,
+				Vout:      out,
+				Signature: nil,
+				PubKey:    wallet.PublicKey,
+			}
 			inputs = append(inputs, input)
 		}
 	}
 
 	// Build a list of outputs
-	from := fmt.Sprintf("%s", wallet.GetAddress())
+	from := string(wallet.GetAddress())
 	outputs = append(outputs, *NewTXOutput(amount, to))
 	if acc > amount {
 		outputs = append(outputs, *NewTXOutput(acc-amount, from)) // a change
 	}
 
-	tx := Transaction{nil, inputs, outputs}
+	tx := Transaction{
+		ID:   nil,
+		Vin:  inputs,
+		Vout: outputs,
+	}
 	tx.ID = tx.Hash()
 	err = UTXOSet.Blockchain.SignTransaction(&tx, wallet.PrivateKey)
 	if err != nil {
