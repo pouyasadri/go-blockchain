@@ -32,14 +32,9 @@ func CreateBlockchain(address string, db storage.Storage) (*Blockchain, error) {
 	}
 	genesis := NewGenesisBlock(cbtx)
 
-	err = db.SaveBlock(genesis.Hash, genesis.Serialize())
+	err = db.SaveBlockAndTip(genesis.Hash, genesis.Serialize())
 	if err != nil {
 		return nil, fmt.Errorf("failed to save genesis block: %w", err)
-	}
-
-	err = db.UpdateTip(genesis.Hash)
-	if err != nil {
-		return nil, fmt.Errorf("failed to update tip: %w", err)
 	}
 
 	bc := &Blockchain{tip: genesis.Hash, db: db}
@@ -73,10 +68,14 @@ func (bc *Blockchain) AddBlock(block *Block) error {
 		return nil
 	}
 
+	pow := NewProofOfWork(block)
+	if !pow.Validate() {
+		return errors.New("invalid block: proof-of-work failed")
+	}
+
 	blockData := block.Serialize()
-	err = bc.db.SaveBlock(block.Hash, blockData)
-	if err != nil {
-		return fmt.Errorf("failed to save block: %w", err)
+	if blockData == nil {
+		return errors.New("failed to serialize block")
 	}
 
 	lastHash, err := bc.db.GetTip()
@@ -95,11 +94,16 @@ func (bc *Blockchain) AddBlock(block *Block) error {
 	}
 
 	if block.Height > lastBlock.Height {
-		err = bc.db.UpdateTip(block.Hash)
+		err = bc.db.SaveBlockAndTip(block.Hash, blockData)
 		if err != nil {
-			return fmt.Errorf("failed to update tip: %w", err)
+			return fmt.Errorf("failed to save block and tip: %w", err)
 		}
 		bc.tip = block.Hash
+	} else {
+		err = bc.db.SaveBlock(block.Hash, blockData)
+		if err != nil {
+			return fmt.Errorf("failed to save block: %w", err)
+		}
 	}
 
 	return nil
@@ -240,14 +244,9 @@ func (bc *Blockchain) MineBlock(transactions []*Transaction) (*Block, error) {
 
 	newBlock := NewBlock(transactions, lastHash, lastBlock.Height+1)
 
-	err = bc.db.SaveBlock(newBlock.Hash, newBlock.Serialize())
+	err = bc.db.SaveBlockAndTip(newBlock.Hash, newBlock.Serialize())
 	if err != nil {
 		return nil, fmt.Errorf("failed to save mined block: %w", err)
-	}
-
-	err = bc.db.UpdateTip(newBlock.Hash)
-	if err != nil {
-		return nil, fmt.Errorf("failed to update tip: %w", err)
 	}
 
 	bc.tip = newBlock.Hash
