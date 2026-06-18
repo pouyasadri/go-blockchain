@@ -534,7 +534,9 @@ func (s *Server) Start(ctx context.Context) {
 	go func() {
 		<-ctx.Done()
 		s.logger.Info("shutting down server...")
-		ln.Close()
+		if err := ln.Close(); err != nil {
+			s.logger.Error("failed to close listener during shutdown", "error", err)
+		}
 	}()
 
 	for {
