@@ -5,7 +5,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 
 	"github.com/pouyasadri/go-blockchain/internal/core"
 	"github.com/pouyasadri/go-blockchain/internal/network"
@@ -253,7 +255,10 @@ func Execute(args []string, out io.Writer) error {
 			if err != nil {
 				return fmt.Errorf("failed to load wallets: %w", err)
 			}
-			wallet := wallets.GetWallet(from)
+			wallet, err := wallets.GetWallet(from)
+			if err != nil {
+				return fmt.Errorf("failed to get wallet: %w", err)
+			}
 
 			tx, err := core.NewUTXOTransaction(&wallet, to, amount, &UTXOSet)
 			if err != nil {
@@ -294,6 +299,9 @@ func Execute(args []string, out io.Writer) error {
 		Use:   "startnode",
 		Short: "Start a node with ID specified in NODE_ID env. var. -miner enables mining",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+
 			miner, _ := cmd.Flags().GetString("miner")
 
 			if miner != "" && !core.ValidateAddress(miner) {
@@ -315,7 +323,7 @@ func Execute(args []string, out io.Writer) error {
 
 			logger := slog.New(slog.NewTextHandler(out, nil))
 			server := network.NewServer(nodeID, miner, bc, logger)
-			server.Start()
+			server.Start(ctx)
 			return nil
 		},
 	}
