@@ -3,16 +3,16 @@ package core
 import (
 	"bytes"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
 )
 
-var (
-	maxNonce = math.MaxInt64
+const (
+	maxNonce   = math.MaxInt64
+	targetBits = 16
 )
-
-const targetBits = 16
 
 // ProofOfWork represents a proof-of-work
 type ProofOfWork struct {
@@ -25,16 +25,19 @@ func NewProofOfWork(b *Block) *ProofOfWork {
 	target := big.NewInt(1)
 	target.Lsh(target, uint(256-targetBits))
 
-	pow := &ProofOfWork{b, target}
+	pow := &ProofOfWork{
+		block:  b,
+		target: target,
+	}
 
 	return pow
 }
 
-func (pow *ProofOfWork) prepareData(nonce int) []byte {
+func (pow *ProofOfWork) prepareData(nonce int, txHash []byte) []byte {
 	data := bytes.Join(
 		[][]byte{
 			pow.block.PrevBlockHash,
-			pow.block.HashTransactions(),
+			txHash,
 			IntToHex(pow.block.Timestamp),
 			IntToHex(int64(targetBits)),
 			IntToHex(int64(nonce)),
@@ -46,17 +49,23 @@ func (pow *ProofOfWork) prepareData(nonce int) []byte {
 }
 
 // Run performs a proof-of-work
-func (pow *ProofOfWork) Run() (int, []byte) {
+func (pow *ProofOfWork) Run() (int, []byte, error) {
 	var hashInt big.Int
 	var hash [32]byte
 	nonce := 0
 
+	// Cache the transaction hash once to avoid rebuilding the Merkle tree on every iteration
+	txHash := pow.block.HashTransactions()
+	if txHash == nil {
+		return 0, nil, errors.New("failed to compute transaction hash")
+	}
+
 	fmt.Printf("Mining a new block")
 	for nonce < maxNonce {
-		data := pow.prepareData(nonce)
+		data := pow.prepareData(nonce, txHash)
 
 		hash = sha256.Sum256(data)
-		if math.Remainder(float64(nonce), 100000) == 0 {
+		if nonce%100000 == 0 {
 			fmt.Printf("\r%x", hash)
 		}
 		hashInt.SetBytes(hash[:])
@@ -69,14 +78,15 @@ func (pow *ProofOfWork) Run() (int, []byte) {
 	}
 	fmt.Print("\n\n")
 
-	return nonce, hash[:]
+	return nonce, hash[:], nil
 }
 
 // Validate validates block's PoW
 func (pow *ProofOfWork) Validate() bool {
 	var hashInt big.Int
 
-	data := pow.prepareData(pow.block.Nonce)
+	txHash := pow.block.HashTransactions()
+	data := pow.prepareData(pow.block.Nonce, txHash)
 	hash := sha256.Sum256(data)
 	hashInt.SetBytes(hash[:])
 
