@@ -52,4 +52,29 @@ func TestWallets(t *testing.T) {
 	w := ws2.GetWallet(addr)
 	assert.NotNil(t, w)
 	assert.Equal(t, addr, string(w.GetAddress()))
+
+	addresses := ws2.GetAddresses()
+	assert.Contains(t, addresses, addr)
+
+	// Test LoadFromFile on non-existent file
+	wsMissing, err := NewWallets("missingnode")
+	assert.NoError(t, err)
+	err = wsMissing.LoadFromFile("missingnode")
+	assert.Error(t, err)
+	assert.True(t, os.IsNotExist(err))
+
+	// Test SaveToFile error
+	err = ws.SaveToFile("invalid_dir_1234/testnode")
+	assert.Error(t, err)
+
+	// Test LoadFromFile decode error
+	err = os.WriteFile("wallet_badnode.dat", []byte("corrupted_data"), 0644)
+	assert.NoError(t, err)
+	defer func() {
+		_ = os.Remove("wallet_badnode.dat")
+	}()
+
+	_, err = NewWallets("badnode")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to decode wallet file")
 }
