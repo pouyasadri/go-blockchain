@@ -31,3 +31,8 @@ func TestBlock(t *testing.T) {
 	assert.Equal(t, block.Height, deserialized.Height)
 	assert.Equal(t, block.PrevBlockHash, deserialized.PrevBlockHash)
 }
+
+func TestDeserializeBlockError(t *testing.T) {
+	_, err := DeserializeBlock([]byte("invalid_data"))
+	assert.Error(t, err)
+}
