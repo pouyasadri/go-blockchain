@@ -4,9 +4,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/boltdb/bolt"
 	"github.com/pouyasadri/go-blockchain/internal/storage"
 	"github.com/stretchr/testify/assert"
+	bolt "go.etcd.io/bbolt"
 )
 
 func TestBoltDBStorage(t *testing.T) {

@@ -3,8 +3,8 @@ package bolt
 import (
 	"fmt"
 
-	"github.com/boltdb/bolt"
 	"github.com/pouyasadri/go-blockchain/internal/storage"
+	bolt "go.etcd.io/bbolt"
 )
 
 const (
@@ -51,7 +51,25 @@ func (d *DB) Close() error {
 func (d *DB) SaveBlock(hash []byte, blockData []byte) error {
 	return d.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
+		if b == nil {
+			return storage.ErrNotFound
+		}
 		return b.Put(hash, blockData)
+	})
+}
+
+// SaveBlockAndTip atomically saves a block and updates the chain tip
+// in a single BoltDB transaction, preventing inconsistent state on crash.
+func (d *DB) SaveBlockAndTip(hash []byte, blockData []byte) error {
+	return d.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(blocksBucket))
+		if b == nil {
+			return storage.ErrNotFound
+		}
+		if err := b.Put(hash, blockData); err != nil {
+			return err
+		}
+		return b.Put([]byte(tipKey), hash)
 	})
 }
 
