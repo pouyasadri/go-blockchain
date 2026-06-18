@@ -74,15 +74,21 @@ func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTXs map[string]Transac
 		txCopy.Vin[inID].Signature = nil
 		txCopy.Vin[inID].PubKey = prevTx.Vout[vin.Vout].PubKeyHash
 
-		dataToSign := fmt.Sprintf("%x\n", txCopy)
+		// Use the canonical hash of the trimmed copy as the message to sign,
+		// not fmt.Sprintf which is not guaranteed to be stable across Go versions.
+		dataToSign := txCopy.Hash()
 
-		r, s, err := ecdsa.Sign(rand.Reader, &privKey, []byte(dataToSign))
+		r, s, err := ecdsa.Sign(rand.Reader, &privKey, dataToSign)
 		if err != nil {
 			return fmt.Errorf("failed to sign transaction: %w", err)
 		}
-		signature := append(r.Bytes(), s.Bytes()...)
-
-		tx.Vin[inID].Signature = signature
+		// Zero-pad r and s to exactly 32 bytes each (P-256 curve).
+		// big.Int.Bytes() drops leading zeros which breaks the fixed-split decode.
+		rBytes := make([]byte, 32)
+		sBytes := make([]byte, 32)
+		r.FillBytes(rBytes)
+		s.FillBytes(sBytes)
+		tx.Vin[inID].Signature = append(rBytes, sBytes...)
 		txCopy.Vin[inID].PubKey = nil
 	}
 
@@ -150,22 +156,25 @@ func (tx *Transaction) Verify(prevTXs map[string]Transaction) bool {
 		txCopy.Vin[inID].Signature = nil
 		txCopy.Vin[inID].PubKey = prevTx.Vout[vin.Vout].PubKeyHash
 
-		r := big.Int{}
-		s := big.Int{}
-		sigLen := len(vin.Signature)
-		r.SetBytes(vin.Signature[:(sigLen / 2)])
-		s.SetBytes(vin.Signature[(sigLen / 2):])
+		// Signatures are stored as 32-byte zero-padded r || s (P-256 curve).
+		if len(vin.Signature) != 64 {
+			return false
+		}
+		r := new(big.Int).SetBytes(vin.Signature[:32])
+		s := new(big.Int).SetBytes(vin.Signature[32:])
 
-		x := big.Int{}
-		y := big.Int{}
-		keyLen := len(vin.PubKey)
-		x.SetBytes(vin.PubKey[:(keyLen / 2)])
-		y.SetBytes(vin.PubKey[(keyLen / 2):])
+		// Public keys are stored as 32-byte zero-padded x || y (P-256 curve).
+		if len(vin.PubKey) != 64 {
+			return false
+		}
+		x := new(big.Int).SetBytes(vin.PubKey[:32])
+		y := new(big.Int).SetBytes(vin.PubKey[32:])
 
-		dataToVerify := fmt.Sprintf("%x\n", txCopy)
+		// Verify against the same canonical hash used during signing.
+		dataToVerify := txCopy.Hash()
 
-		rawPubKey := ecdsa.PublicKey{Curve: curve, X: &x, Y: &y}
-		if !ecdsa.Verify(&rawPubKey, []byte(dataToVerify), &r, &s) {
+		rawPubKey := ecdsa.PublicKey{Curve: curve, X: x, Y: y}
+		if !ecdsa.Verify(&rawPubKey, dataToVerify, r, s) {
 			return false
 		}
 		txCopy.Vin[inID].PubKey = nil
