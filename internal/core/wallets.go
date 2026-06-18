@@ -41,7 +41,7 @@ func (ws *Wallets) CreateWallet() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	address := fmt.Sprintf("%s", wallet.GetAddress())
+	address := string(wallet.GetAddress())
 
 	ws.Wallets[address] = wallet
 
