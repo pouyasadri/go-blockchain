@@ -164,7 +164,6 @@ func TestExecuteCliValidationErrors(t *testing.T) {
 	assert.NoError(t, err)
 	lines := strings.Split(strings.TrimSpace(out.String()), ": ")
 	validAddr := lines[1]
-	t.Logf("out: %q, validAddr: %q", out.String(), validAddr)
 
 	out.Reset()
 	err = Execute([]string{"send", "--from", validAddr, "--to", "invalid_addr", "--amount", "10"}, out)
