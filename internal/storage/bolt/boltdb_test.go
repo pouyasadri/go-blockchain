@@ -14,7 +14,9 @@ func TestBoltDBStorage(t *testing.T) {
 	db, err := Open(dbFile)
 	assert.NoError(t, err)
 	assert.NotNil(t, db)
-	defer db.Close()
+	defer func() {
+		assert.NoError(t, db.Close())
+	}()
 
 	// Test GetTip initially
 	tip, err := db.GetTip()

@@ -13,19 +13,23 @@ func TestExecuteCreateBlockchain(t *testing.T) {
 	dir := t.TempDir()
 
 	// Temporarily override NODE_ID
-	os.Setenv("NODE_ID", "testnode")
-	defer os.Unsetenv("NODE_ID")
+	t.Setenv("NODE_ID", "testnode")
 
 	// Since CLI hardcodes file creation in current dir, we change dir temporarily
-	originalWd, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(originalWd)
+	originalWd, err := os.Getwd()
+	assert.NoError(t, err)
+	err = os.Chdir(dir)
+	assert.NoError(t, err)
+	defer func() {
+		err := os.Chdir(originalWd)
+		assert.NoError(t, err)
+	}()
 
 	out := new(bytes.Buffer)
 
 	// Wait, we need an address to create a blockchain.
 	// We'll run createwallet first
-	err := Execute([]string{"createwallet"}, out)
+	err = Execute([]string{"createwallet"}, out)
 	assert.NoError(t, err)
 
 	// Output format: "Your new address: <addr>\n"

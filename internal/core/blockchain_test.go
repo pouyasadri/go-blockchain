@@ -14,7 +14,9 @@ func TestBlockchainAndUTXOIntegration(t *testing.T) {
 
 	db, err := bolt.Open(dbFile)
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		assert.NoError(t, db.Close())
+	}()
 
 	// 1. Create a wallet and blockchain
 	wallet, _ := NewWallet()
@@ -78,8 +80,11 @@ func TestGetBlockAndHashes(t *testing.T) {
 	dir := t.TempDir()
 	dbFile := filepath.Join(dir, "test2.db")
 
-	db, _ := bolt.Open(dbFile)
-	defer db.Close()
+	db, err := bolt.Open(dbFile)
+	assert.NoError(t, err)
+	defer func() {
+		assert.NoError(t, db.Close())
+	}()
 
 	wallet, _ := NewWallet()
 	addr := string(wallet.GetAddress())
