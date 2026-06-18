@@ -59,6 +59,9 @@ func (d *DB) GetBlock(hash []byte) ([]byte, error) {
 	var blockData []byte
 	err := d.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
+		if b == nil {
+			return storage.ErrNotFound
+		}
 		data := b.Get(hash)
 		if data == nil {
 			return storage.ErrNotFound
@@ -76,6 +79,9 @@ func (d *DB) GetTip() ([]byte, error) {
 	var tip []byte
 	err := d.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
+		if b == nil {
+			return storage.ErrNotFound
+		}
 		data := b.Get([]byte(tipKey))
 		if data == nil {
 			return storage.ErrNotFound
@@ -98,6 +104,9 @@ func (d *DB) GetUTXO(txID []byte) ([]byte, error) {
 	var outsData []byte
 	err := d.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(utxoBucket))
+		if b == nil {
+			return storage.ErrNotFound
+		}
 		data := b.Get(txID)
 		if data == nil {
 			return storage.ErrNotFound
