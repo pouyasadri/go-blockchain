@@ -10,6 +10,8 @@ var (
 type Storage interface {
 	// Block operations
 	SaveBlock(hash []byte, blockData []byte) error
+	// SaveBlockAndTip atomically saves a block and updates the chain tip in one transaction.
+	SaveBlockAndTip(hash []byte, blockData []byte) error
 	GetBlock(hash []byte) ([]byte, error)
 	GetTip() ([]byte, error)
 	UpdateTip(hash []byte) error
