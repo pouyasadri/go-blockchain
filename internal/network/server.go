@@ -104,15 +104,6 @@ func (s *Server) requestBlocks() {
 	}
 }
 
-func (s *Server) sendAddr(address string) {
-	nodes := addr{AddrList: s.knownNodes}
-	nodes.AddrList = append(nodes.AddrList, s.nodeAddress)
-	payload := gobEncode(nodes)
-	request := append(commandToBytes("addr"), payload...)
-
-	s.sendData(address, request)
-}
-
 func (s *Server) sendBlock(addr string, b *core.Block) {
 	data := block{AddrFrom: s.nodeAddress, Block: b.Serialize()}
 	payload := gobEncode(data)
@@ -134,7 +125,11 @@ func (s *Server) sendData(addr string, data []byte) {
 		s.knownNodes = updatedNodes
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		if cerr := conn.Close(); cerr != nil {
+			s.logger.Error("failed to close connection", "error", cerr)
+		}
+	}()
 
 	_, err = io.Copy(conn, bytes.NewReader(data))
 	if err != nil {
@@ -464,7 +459,9 @@ func (s *Server) handleConnection(conn net.Conn) {
 		s.logger.Warn("unknown command received", "command", command)
 	}
 
-	conn.Close()
+	if cerr := conn.Close(); cerr != nil {
+		s.logger.Error("failed to close connection", "error", cerr)
+	}
 }
 
 // Start starts the P2P server
@@ -474,7 +471,11 @@ func (s *Server) Start() {
 		s.logger.Error("failed to start server", "error", err)
 		return
 	}
-	defer ln.Close()
+	defer func() {
+		if cerr := ln.Close(); cerr != nil {
+			s.logger.Error("failed to close listener", "error", cerr)
+		}
+	}()
 
 	if len(s.knownNodes) > 0 && s.nodeAddress != s.knownNodes[0] {
 		s.sendVersion(s.knownNodes[0])

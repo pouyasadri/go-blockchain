@@ -20,7 +20,9 @@ func TestServerStartAndCommands(t *testing.T) {
 
 	db, err := bolt.Open(dbFile)
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		assert.NoError(t, db.Close())
+	}()
 
 	wallet, _ := core.NewWallet()
 	walletAddr := string(wallet.GetAddress())
@@ -49,7 +51,7 @@ func TestServerStartAndCommands(t *testing.T) {
 
 	_, err = io.Copy(conn, bytes.NewReader(request))
 	assert.NoError(t, err)
-	conn.Close()
+	assert.NoError(t, conn.Close())
 
 	// Another command
 	conn2, err := net.Dial("tcp", "localhost:5000")
@@ -58,7 +60,7 @@ func TestServerStartAndCommands(t *testing.T) {
 	req2 := append(commandToBytes("getblocks"), getBlocksPayload...)
 	_, err = io.Copy(conn2, bytes.NewReader(req2))
 	assert.NoError(t, err)
-	conn2.Close()
+	assert.NoError(t, conn2.Close())
 
 	// Addr command
 	conn3, err := net.Dial("tcp", "localhost:5000")
@@ -67,7 +69,7 @@ func TestServerStartAndCommands(t *testing.T) {
 	req3 := append(commandToBytes("addr"), addrPayload...)
 	_, err = io.Copy(conn3, bytes.NewReader(req3))
 	assert.NoError(t, err)
-	conn3.Close()
+	assert.NoError(t, conn3.Close())
 
 	// GetData block command
 	conn4, err := net.Dial("tcp", "localhost:5000")
@@ -79,7 +81,7 @@ func TestServerStartAndCommands(t *testing.T) {
 		_, err = io.Copy(conn4, bytes.NewReader(req4))
 		assert.NoError(t, err)
 	}
-	conn4.Close()
+	assert.NoError(t, conn4.Close())
 
 	// Inv command
 	conn5, err := net.Dial("tcp", "localhost:5000")
@@ -88,20 +90,29 @@ func TestServerStartAndCommands(t *testing.T) {
 	req5 := append(commandToBytes("inv"), invPayload...)
 	_, err = io.Copy(conn5, bytes.NewReader(req5))
 	assert.NoError(t, err)
-	conn5.Close()
+	assert.NoError(t, conn5.Close())
 
 	// Tx command
 	conn6, err := net.Dial("tcp", "localhost:5000")
 	assert.NoError(t, err)
-	txin := core.TXInput{[]byte{}, -1, nil, wallet.PublicKey}
+	txin := core.TXInput{
+		Txid:      []byte{},
+		Vout:      -1,
+		Signature: nil,
+		PubKey:    wallet.PublicKey,
+	}
 	txout := core.NewTXOutput(10, walletAddr)
-	txn := &core.Transaction{nil, []core.TXInput{txin}, []core.TXOutput{*txout}}
+	txn := &core.Transaction{
+		ID:   nil,
+		Vin:  []core.TXInput{txin},
+		Vout: []core.TXOutput{*txout},
+	}
 	txn.ID = txn.Hash()
 	txPayload := gobEncode(tx{AddFrom: "localhost:5001", Transaction: txn.Serialize()})
 	req6 := append(commandToBytes("tx"), txPayload...)
 	_, err = io.Copy(conn6, bytes.NewReader(req6))
 	assert.NoError(t, err)
-	conn6.Close()
+	assert.NoError(t, conn6.Close())
 
 	// Block command
 	conn7, err := net.Dial("tcp", "localhost:5000")
@@ -111,7 +122,7 @@ func TestServerStartAndCommands(t *testing.T) {
 	req7 := append(commandToBytes("block"), blockPayload...)
 	_, err = io.Copy(conn7, bytes.NewReader(req7))
 	assert.NoError(t, err)
-	conn7.Close()
+	assert.NoError(t, conn7.Close())
 
 	// Wait for handling
 	time.Sleep(200 * time.Millisecond)
