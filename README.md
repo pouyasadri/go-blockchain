@@ -6,20 +6,20 @@
 [![Coverage Status](https://img.shields.io/badge/Coverage-~70%25-brightgreen.svg?style=flat-square)](https://github.com/pouyasadri/go-blockchain/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 
-A fully-featured, educational blockchain server and node implementation written entirely in Go. This showcase project demonstrates advanced Go system design best practices, robust testing methodologies, and modern Go features.
+A fully-featured, educational blockchain server and node implementation written entirely in Go. This showcase project demonstrates advanced Go system design best practices, robust testing methodologies, secure cryptographic engineering, and modern Go features (such as `iter.Seq` range-over-func).
 
 ## ✨ Features
 
-- **Decentralized P2P Network**: Robust TCP-based server communication to propagate blocks and transactions across nodes.
-- **Proof-of-Work Consensus**: Implementation of a dynamic difficulty PoW mining algorithm.
+- **Decentralized P2P Network**: Robust TCP-based server communication to propagate blocks and transactions across nodes. Includes protection against memory exhaustion DoS vectors via `io.LimitReader` and strict message size limits.
+- **Proof-of-Work Consensus**: Implementation of a dynamic difficulty PoW mining algorithm with performance optimizations for caching Merkle Trees.
 - **UTXO Model**: Unspent Transaction Output (UTXO) model for accurate balance checking and validation.
-- **Elliptic Curve Cryptography**: Secure wallet generation and transaction signing using ECDSA (`secp256r1`) and SHA-256.
-- **Persistent Storage**: Efficient key-value data management backed by BoltDB.
+- **Elliptic Curve Cryptography**: Secure wallet generation and transaction signing using ECDSA (`secp256r1`) and SHA-256. Employs canonical signing and proper zero-padding fixes for deterministic signature lengths.
+- **Persistent Storage**: Efficient key-value data management backed by `go.etcd.io/bbolt`, featuring atomic multi-key transactions for crash-safe state updates.
 - **Modern CLI**: Intuitive command-line interface powered by `Cobra`.
 
 ## 🏗 System Architecture
 
-The architecture is built using highly cohesive, decoupled domains to ensure maintainability and testability:
+The architecture is built using highly cohesive, decoupled domains to ensure maintainability, concurrency-safety, and testability:
 
 ```mermaid
 graph TD
@@ -28,7 +28,7 @@ graph TD
     end
 
     subgraph Network ["Network Layer (internal/network)"]
-        P2P[P2P Server]
+        P2P[P2P Server w/ sync.RWMutex]
         CmdHandler[Command Handlers]
     end
 
@@ -37,24 +37,25 @@ graph TD
         PoW[Proof of Work]
         TX[Transaction & UTXOSet]
         Wall[Wallets]
-        Merkle[Merkle Trees]
+        Merkle[Merkle Trees w/ CVE-2012-2459 mitigation]
     end
 
     subgraph Storage ["Storage Layer (internal/storage)"]
-        Bolt[BoltDB]
+        bbolt[go.etcd.io/bbolt]
     end
 
     CmdLine -.->|Initializes| Core
-    CmdLine -.->|Starts| Network
+    CmdLine -.->|Starts Context| Network
     Network <-->|Propagates & Validates| Core
-    Core <-->|Persists State| Storage
+    Core <-->|Atomic Persistence| Storage
     P2P <-->|TCP Protocols| ExtNodes[External Nodes]
 ```
 
-- **`internal/core`**: The heart of the blockchain, encapsulating blocks, cryptography, transactions, and consensus.
-- **`internal/storage`**: Interfaces and implementations (like BoltDB) abstracting database interactions.
-- **`internal/network`**: Handles all asynchronous peer-to-peer TCP protocols and message routing.
-- **`internal/cli`**: The entrypoint and CLI wrapper using dependency injection for seamless testing.
+### Technical Highlights
+- **Thread Safety**: The P2P node `Server` utilizes `sync.RWMutex` to protect shared state (mempool, known nodes, blocks in transit) across concurrent connection handlers.
+- **Data Integrity**: Database interactions leverage BoltDB's atomic transactions to commit blocks and update chain tips simultaneously, eliminating the risk of torn writes during crashes.
+- **Cryptographic Correctness**: Implements strict `ecdsa` signature normalization. Public keys and signature tuples (r, s) are properly zero-padded to `P-256` boundaries (32 bytes), avoiding non-deterministic decoding errors.
+- **Memory Safety**: Network endpoints are secured using `io.LimitReader` to bound memory allocation during payload deserialization, thwarting resource-exhaustion attacks.
 
 ## 🚀 Getting Started
 
@@ -103,7 +104,7 @@ export NODE_ID=3000
 
 ## 🧪 Testing and CI
 
-This repository is strictly tested with >70% coverage. To run tests locally:
+This repository is heavily tested with end-to-end and unit coverage of core mechanics (Proof of Work, Serialization, UTXOs). To run tests locally:
 
 ```bash
 # Run unit, integration, and e2e tests
