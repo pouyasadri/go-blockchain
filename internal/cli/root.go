@@ -50,7 +50,9 @@ func Execute(args []string, out io.Writer) error {
 			if err != nil {
 				return fmt.Errorf("failed to open storage: %w", err)
 			}
-			defer db.Close()
+			defer func() {
+				_ = db.Close()
+			}()
 
 			bc, err := core.CreateBlockchain(address, db)
 			if err != nil {
@@ -107,7 +109,9 @@ func Execute(args []string, out io.Writer) error {
 			if err != nil {
 				return fmt.Errorf("failed to open storage: %w", err)
 			}
-			defer db.Close()
+			defer func() {
+				_ = db.Close()
+			}()
 
 			bc, err := core.NewBlockchain(db)
 			if err != nil {
@@ -158,7 +162,9 @@ func Execute(args []string, out io.Writer) error {
 			if err != nil {
 				return fmt.Errorf("failed to open storage: %w", err)
 			}
-			defer db.Close()
+			defer func() {
+				_ = db.Close()
+			}()
 
 			bc, err := core.NewBlockchain(db)
 			if err != nil {
@@ -184,7 +190,9 @@ func Execute(args []string, out io.Writer) error {
 			if err != nil {
 				return fmt.Errorf("failed to open storage: %w", err)
 			}
-			defer db.Close()
+			defer func() {
+				_ = db.Close()
+			}()
 
 			bc, err := core.NewBlockchain(db)
 			if err != nil {
@@ -230,7 +238,9 @@ func Execute(args []string, out io.Writer) error {
 			if err != nil {
 				return fmt.Errorf("failed to open storage: %w", err)
 			}
-			defer db.Close()
+			defer func() {
+				_ = db.Close()
+			}()
 
 			bc, err := core.NewBlockchain(db)
 			if err != nil {
@@ -294,7 +304,9 @@ func Execute(args []string, out io.Writer) error {
 			if err != nil {
 				return fmt.Errorf("failed to open storage: %w", err)
 			}
-			defer db.Close()
+			defer func() {
+				_ = db.Close()
+			}()
 
 			bc, err := core.NewBlockchain(db)
 			if err != nil {

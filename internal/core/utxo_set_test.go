@@ -14,7 +14,9 @@ func TestUTXOSet(t *testing.T) {
 
 	db, err := bolt.Open(dbFile)
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		assert.NoError(t, db.Close())
+	}()
 
 	wallet, _ := NewWallet()
 	addr := string(wallet.GetAddress())
