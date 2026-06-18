@@ -60,8 +60,11 @@ func (ws *Wallets) GetAddresses() []string {
 }
 
 // GetWallet returns a Wallet by its address
-func (ws Wallets) GetWallet(address string) Wallet {
-	return *ws.Wallets[address]
+func (ws Wallets) GetWallet(address string) (Wallet, error) {
+	if wallet, ok := ws.Wallets[address]; ok {
+		return *wallet, nil
+	}
+	return Wallet{}, fmt.Errorf("wallet %s not found", address)
 }
 
 // LoadFromFile loads wallets from the file
@@ -120,7 +123,8 @@ func (ws Wallets) SaveToFile(nodeID string) error {
 		return fmt.Errorf("failed to encode wallets: %w", err)
 	}
 
-	err = os.WriteFile(wFile, content.Bytes(), 0644)
+	// Write wallet file with restrictive permissions (owner read/write only)
+	err = os.WriteFile(wFile, content.Bytes(), 0600)
 	if err != nil {
 		return fmt.Errorf("failed to write wallet file: %w", err)
 	}
