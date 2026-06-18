@@ -31,7 +31,7 @@ func TestWallets(t *testing.T) {
 	nodeID := "testnode"
 
 	t.Cleanup(func() {
-		os.Remove("wallet_testnode.dat")
+		_ = os.Remove("wallet_testnode.dat")
 	})
 
 	ws, err := NewWallets(nodeID)

@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 
+	//nolint:staticcheck // ripemd160 is required for Bitcoin-compatible hashing (Hash160)
 	"golang.org/x/crypto/ripemd160"
 )
 
@@ -26,7 +27,10 @@ func NewWallet() (*Wallet, error) {
 	if err != nil {
 		return nil, err
 	}
-	wallet := Wallet{private, public}
+	wallet := Wallet{
+		PrivateKey: private,
+		PublicKey:  public,
+	}
 
 	return &wallet, nil
 }
@@ -80,7 +84,7 @@ func newKeyPair() (ecdsa.PrivateKey, []byte, error) {
 	if err != nil {
 		return ecdsa.PrivateKey{}, nil, fmt.Errorf("failed to generate ecdsa key pair: %w", err)
 	}
-	pubKey := append(private.PublicKey.X.Bytes(), private.PublicKey.Y.Bytes()...)
+	pubKey := append(private.X.Bytes(), private.Y.Bytes()...)
 
 	return *private, pubKey, nil
 }
