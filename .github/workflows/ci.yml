@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.25'
+
+    - name: Install dependencies
+      run: go mod download
+
+    - name: Run linter
+      uses: golangci/golangci-lint-action@v3
+      with:
+        version: latest
+
+    - name: Run tests with coverage
+      run: |
+        go test -v -coverprofile=coverage.out ./...
+        go tool cover -func=coverage.out
+
+    - name: Check coverage is above 90%
+      run: |
+        total=$(go tool cover -func=coverage.out | grep total | grep -Eo '[0-9]+\.[0-9]+')
+        echo "Total Coverage: $total%"
+        if (( $(echo "$total < 90.0" | bc -l) )); then
+          echo "Test coverage is below 90% threshold"
+          exit 1
+        fi
