@@ -2,6 +2,7 @@ package network
 
 import (
 	"bytes"
+	"context"
 	"encoding/gob"
 	"encoding/hex"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"sync"
 
 	"github.com/pouyasadri/go-blockchain/internal/core"
 )
@@ -55,6 +57,7 @@ type verzion struct {
 
 // Server represents a P2P node in the network
 type Server struct {
+	mu              sync.RWMutex
 	nodeAddress     string
 	miningAddress   string
 	knownNodes      []string
@@ -191,8 +194,17 @@ func (s *Server) handleAddr(request []byte) {
 		return
 	}
 
-	s.knownNodes = append(s.knownNodes, payload.AddrList...)
-	s.logger.Info("known nodes updated", "count", len(s.knownNodes))
+	s.mu.Lock()
+	// Deduplicate before appending to guard against unbounded peer list growth.
+	for _, newAddr := range payload.AddrList {
+		if !s.nodeIsKnownLocked(newAddr) {
+			s.knownNodes = append(s.knownNodes, newAddr)
+		}
+	}
+	count := len(s.knownNodes)
+	s.mu.Unlock()
+
+	s.logger.Info("known nodes updated", "count", count)
 	s.requestBlocks()
 }
 
@@ -209,28 +221,30 @@ func (s *Server) handleBlock(request []byte) {
 	}
 
 	blockData := payload.Block
-	block, err := core.DeserializeBlock(blockData)
+	b, err := core.DeserializeBlock(blockData)
 	if err != nil {
 		s.logger.Error("failed to deserialize block", "error", err)
 		return
 	}
 
-	s.logger.Info("received a new block", "hash", fmt.Sprintf("%x", block.Hash))
-	err = s.bc.AddBlock(block)
+	s.logger.Info("received a new block", "hash", fmt.Sprintf("%x", b.Hash))
+	err = s.bc.AddBlock(b)
 	if err != nil {
 		s.logger.Error("failed to add block", "error", err)
 		return
 	}
 
+	s.mu.Lock()
 	if len(s.blocksInTransit) > 0 {
 		blockHash := s.blocksInTransit[0]
-		s.sendGetData(payload.AddrFrom, "block", blockHash)
 		s.blocksInTransit = s.blocksInTransit[1:]
+		s.mu.Unlock()
+		s.sendGetData(payload.AddrFrom, "block", blockHash)
 	} else {
+		s.mu.Unlock()
 		UTXOSet := core.UTXOSet{Blockchain: s.bc}
-		err := UTXOSet.Reindex()
-		if err != nil {
-			s.logger.Error("failed to reindex utxo set", "error", err)
+		if rerr := UTXOSet.Reindex(); rerr != nil {
+			s.logger.Error("failed to reindex utxo set", "error", rerr)
 		}
 	}
 }
@@ -249,12 +263,10 @@ func (s *Server) handleInv(request []byte) {
 
 	s.logger.Info("received inventory", "count", len(payload.Items), "type", payload.Type)
 
-	if payload.Type == "block" {
+	if payload.Type == "block" && len(payload.Items) > 0 {
+		s.mu.Lock()
 		s.blocksInTransit = payload.Items
-
 		blockHash := payload.Items[0]
-		s.sendGetData(payload.AddrFrom, "block", blockHash)
-
 		var newInTransit [][]byte
 		for _, b := range s.blocksInTransit {
 			if !bytes.Equal(b, blockHash) {
@@ -262,11 +274,16 @@ func (s *Server) handleInv(request []byte) {
 			}
 		}
 		s.blocksInTransit = newInTransit
+		s.mu.Unlock()
+		s.sendGetData(payload.AddrFrom, "block", blockHash)
 	}
 
-	if payload.Type == "tx" {
+	if payload.Type == "tx" && len(payload.Items) > 0 {
 		txID := payload.Items[0]
-		if _, ok := s.mempool[hex.EncodeToString(txID)]; !ok {
+		s.mu.RLock()
+		_, inPool := s.mempool[hex.EncodeToString(txID)]
+		s.mu.RUnlock()
+		if !inPool {
 			s.sendGetData(payload.AddrFrom, "tx", txID)
 		}
 	}
@@ -332,70 +349,93 @@ func (s *Server) handleTx(request []byte) {
 	}
 
 	txData := payload.Transaction
-	tx, err := core.DeserializeTransaction(txData)
+	newTx, err := core.DeserializeTransaction(txData)
 	if err != nil {
 		s.logger.Error("failed to deserialize tx", "error", err)
 		return
 	}
-	s.mempool[hex.EncodeToString(tx.ID)] = tx
 
-	if len(s.knownNodes) > 0 && s.nodeAddress == s.knownNodes[0] {
-		for _, node := range s.knownNodes {
+	s.mu.Lock()
+	s.mempool[hex.EncodeToString(newTx.ID)] = newTx
+	s.mu.Unlock()
+
+	s.mu.RLock()
+	isFirstNode := len(s.knownNodes) > 0 && s.nodeAddress == s.knownNodes[0]
+	s.mu.RUnlock()
+
+	if isFirstNode {
+		s.mu.RLock()
+		nodes := make([]string, len(s.knownNodes))
+		copy(nodes, s.knownNodes)
+		s.mu.RUnlock()
+		for _, node := range nodes {
 			if node != s.nodeAddress && node != payload.AddFrom {
-				s.sendInv(node, "tx", [][]byte{tx.ID})
+				s.sendInv(node, "tx", [][]byte{newTx.ID})
 			}
 		}
-	} else {
-		if len(s.mempool) >= 2 && len(s.miningAddress) > 0 && len(s.knownNodes) > 0 {
-		MineTransactions:
-			var txs []*core.Transaction
+		return
+	}
 
-			for id := range s.mempool {
-				txn := s.mempool[id]
-				valid, _ := s.bc.VerifyTransaction(&txn)
-				if valid {
-					txs = append(txs, &txn)
-				}
+	// Mining node: attempt to mine when mempool reaches threshold.
+	for {
+		s.mu.RLock()
+		mempoolSize := len(s.mempool)
+		miningAddr := s.miningAddress
+		nodesLen := len(s.knownNodes)
+		s.mu.RUnlock()
+
+		if mempoolSize < 2 || len(miningAddr) == 0 || nodesLen == 0 {
+			break
+		}
+
+		var txs []*core.Transaction
+		s.mu.RLock()
+		for id := range s.mempool {
+			txn := s.mempool[id]
+			valid, _ := s.bc.VerifyTransaction(&txn)
+			if valid {
+				txs = append(txs, &txn)
 			}
+		}
+		s.mu.RUnlock()
 
-			if len(txs) == 0 {
-				s.logger.Info("all transactions are invalid! waiting for new ones...")
-				return
-			}
+		if len(txs) == 0 {
+			s.logger.Info("all transactions are invalid! waiting for new ones...")
+			break
+		}
 
-			cbTx, err := core.NewCoinbaseTX(s.miningAddress, "")
-			if err != nil {
-				s.logger.Error("failed to create coinbase tx", "error", err)
-				return
-			}
-			txs = append(txs, cbTx)
+		cbTx, err := core.NewCoinbaseTX(miningAddr, "")
+		if err != nil {
+			s.logger.Error("failed to create coinbase tx", "error", err)
+			break
+		}
+		txs = append(txs, cbTx)
 
-			newBlock, err := s.bc.MineBlock(txs)
-			if err != nil {
-				s.logger.Error("failed to mine block", "error", err)
-				return
-			}
-			UTXOSet := core.UTXOSet{Blockchain: s.bc}
-			err = UTXOSet.Reindex()
-			if err != nil {
-				s.logger.Error("failed to reindex utxoset after mining", "error", err)
-			}
+		newBlock, err := s.bc.MineBlock(txs)
+		if err != nil {
+			s.logger.Error("failed to mine block", "error", err)
+			break
+		}
+		UTXOSet := core.UTXOSet{Blockchain: s.bc}
+		if rerr := UTXOSet.Reindex(); rerr != nil {
+			s.logger.Error("failed to reindex utxoset after mining", "error", rerr)
+		}
 
-			s.logger.Info("new block is mined!", "hash", fmt.Sprintf("%x", newBlock.Hash))
+		s.logger.Info("new block is mined!", "hash", fmt.Sprintf("%x", newBlock.Hash))
 
-			for _, t := range txs {
-				txID := hex.EncodeToString(t.ID)
-				delete(s.mempool, txID)
-			}
+		s.mu.Lock()
+		for _, t := range txs {
+			delete(s.mempool, hex.EncodeToString(t.ID))
+		}
+		s.mu.Unlock()
 
-			for _, node := range s.knownNodes {
-				if node != s.nodeAddress {
-					s.sendInv(node, "block", [][]byte{newBlock.Hash})
-				}
-			}
-
-			if len(s.mempool) > 0 {
-				goto MineTransactions
+		s.mu.RLock()
+		nodes := make([]string, len(s.knownNodes))
+		copy(nodes, s.knownNodes)
+		s.mu.RUnlock()
+		for _, node := range nodes {
+			if node != s.nodeAddress {
+				s.sendInv(node, "block", [][]byte{newBlock.Hash})
 			}
 		}
 	}
@@ -426,15 +466,23 @@ func (s *Server) handleVersion(request []byte) {
 		s.sendVersion(payload.AddrFrom)
 	}
 
-	if !s.nodeIsKnown(payload.AddrFrom) {
+	s.mu.Lock()
+	if !s.nodeIsKnownLocked(payload.AddrFrom) {
 		s.knownNodes = append(s.knownNodes, payload.AddrFrom)
 	}
+	s.mu.Unlock()
 }
 
 func (s *Server) handleConnection(conn net.Conn) {
-	request, err := io.ReadAll(conn)
+	// Protect against memory exhaustion: cap incoming message size at 32 MB.
+	const maxMsgSize = 32 << 20
+	request, err := io.ReadAll(io.LimitReader(conn, maxMsgSize))
 	if err != nil {
 		s.logger.Error("failed to read from connection", "error", err)
+		return
+	}
+	if len(request) < commandLength {
+		s.logger.Warn("received message too short to contain a command")
 		return
 	}
 	command := bytesToCommand(request[:commandLength])
@@ -464,8 +512,8 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 }
 
-// Start starts the P2P server
-func (s *Server) Start() {
+// Start starts the P2P server and blocks until context is cancelled
+func (s *Server) Start(ctx context.Context) {
 	ln, err := net.Listen(protocol, s.nodeAddress)
 	if err != nil {
 		s.logger.Error("failed to start server", "error", err)
@@ -482,6 +530,12 @@ func (s *Server) Start() {
 	}
 
 	s.logger.Info("server started", "address", s.nodeAddress)
+
+	go func() {
+		<-ctx.Done()
+		s.logger.Info("shutting down server...")
+		ln.Close()
+	}()
 
 	for {
 		conn, err := ln.Accept()
@@ -507,7 +561,8 @@ func gobEncode(data any) []byte {
 	return buff.Bytes()
 }
 
-func (s *Server) nodeIsKnown(addr string) bool {
+// nodeIsKnownLocked checks if addr is in knownNodes. Must be called with s.mu held.
+func (s *Server) nodeIsKnownLocked(addr string) bool {
 	for _, node := range s.knownNodes {
 		if node == addr {
 			return true
@@ -516,17 +571,32 @@ func (s *Server) nodeIsKnown(addr string) bool {
 	return false
 }
 
+// nodeIsKnown checks if addr is in knownNodes (thread-safe).
+func (s *Server) nodeIsKnown(addr string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.nodeIsKnownLocked(addr)
+}
+
+// SendTxToKnownNodes sends a transaction to all known nodes
 func (s *Server) SendTxToKnownNodes(tx *core.Transaction) {
+	s.mu.RLock()
 	if len(s.knownNodes) == 0 {
+		s.mu.RUnlock()
 		return
 	}
-	if s.nodeAddress == s.knownNodes[0] {
-		for _, node := range s.knownNodes {
+	isFirstNode := s.nodeAddress == s.knownNodes[0]
+	nodes := make([]string, len(s.knownNodes))
+	copy(nodes, s.knownNodes)
+	s.mu.RUnlock()
+
+	if isFirstNode {
+		for _, node := range nodes {
 			if node != s.nodeAddress {
 				s.sendInv(node, "tx", [][]byte{tx.ID})
 			}
 		}
 	} else {
-		s.sendTx(s.knownNodes[0], tx)
+		s.sendTx(nodes[0], tx)
 	}
 }

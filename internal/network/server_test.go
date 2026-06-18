@@ -2,6 +2,7 @@ package network
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"io"
 	"log/slog"
@@ -37,7 +38,7 @@ func TestServerStartAndCommands(t *testing.T) {
 	assert.NotNil(t, server)
 
 	// Since Start blocks, we run it in a goroutine
-	go server.Start()
+	go server.Start(context.Background())
 
 	// Wait a moment for the server to start listening
 	time.Sleep(100 * time.Millisecond)
@@ -239,7 +240,7 @@ func TestServerDecodingErrors(t *testing.T) {
 	server := NewServer("7000", walletAddr, bc, logger)
 	assert.NotNil(t, server)
 
-	go server.Start()
+	go server.Start(context.Background())
 	time.Sleep(100 * time.Millisecond)
 
 	commands := []string{"version", "block", "inv", "getblocks", "getdata", "tx"}
@@ -319,7 +320,7 @@ func TestServerHelpers(t *testing.T) {
 	assert.False(t, server.nodeIsKnown("localhost:9001"))
 
 	// Start server
-	go server.Start()
+	go server.Start(context.Background())
 	time.Sleep(100 * time.Millisecond)
 
 	// 2. Unknown command test
@@ -333,7 +334,7 @@ func TestServerHelpers(t *testing.T) {
 
 	// 3. Listen failing when port is in use
 	server2 := NewServer("9000", walletAddr, bc, logger)
-	server2.Start() // should log error and return immediately
+	server2.Start(context.Background()) // should log error and return immediately
 }
 
 func TestGobEncodeError(t *testing.T) {
