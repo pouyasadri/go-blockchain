@@ -98,7 +98,9 @@ func TestExecuteCreateBlockchain(t *testing.T) {
 	t.Setenv("NODE_ID", "9005")
 	ln, err := net.Listen("tcp", "localhost:9005")
 	assert.NoError(t, err)
-	defer ln.Close()
+	defer func() {
+		assert.NoError(t, ln.Close())
+	}()
 
 	// 2. We need a blockchain DB for nodeID "9005" first
 	out.Reset()
@@ -162,6 +164,7 @@ func TestExecuteCliValidationErrors(t *testing.T) {
 	assert.NoError(t, err)
 	lines := strings.Split(strings.TrimSpace(out.String()), ": ")
 	validAddr := lines[1]
+	t.Logf("out: %q, validAddr: %q", out.String(), validAddr)
 
 	out.Reset()
 	err = Execute([]string{"send", "--from", validAddr, "--to", "invalid_addr", "--amount", "10"}, out)
