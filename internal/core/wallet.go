@@ -87,7 +87,13 @@ func newKeyPair() (ecdsa.PrivateKey, []byte, error) {
 	if err != nil {
 		return ecdsa.PrivateKey{}, nil, fmt.Errorf("failed to generate ecdsa key pair: %w", err)
 	}
-	pubKey := append(private.X.Bytes(), private.Y.Bytes()...)
+	// Zero-pad X and Y to exactly 32 bytes each (P-256 curve requirement).
+	// big.Int.Bytes() drops leading zeros; FillBytes guarantees fixed width.
+	xBytes := make([]byte, 32)
+	yBytes := make([]byte, 32)
+	private.X.FillBytes(xBytes)
+	private.Y.FillBytes(yBytes)
+	pubKey := append(xBytes, yBytes...)
 
 	return *private, pubKey, nil
 }

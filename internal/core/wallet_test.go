@@ -49,7 +49,8 @@ func TestWallets(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, ws2)
 
-	w := ws2.GetWallet(addr)
+	w, err := ws2.GetWallet(addr)
+	assert.NoError(t, err)
 	assert.NotNil(t, w)
 	assert.Equal(t, addr, string(w.GetAddress()))
 
