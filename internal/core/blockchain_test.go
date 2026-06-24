@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
@@ -50,7 +51,7 @@ func TestBlockchainAndUTXOIntegration(t *testing.T) {
 	assert.NoError(t, err)
 
 	cbTx, _ := NewCoinbaseTX(address, "")
-	newBlock, err := bc.MineBlock([]*Transaction{cbTx, tx})
+	newBlock, err := bc.MineBlock(context.Background(), []*Transaction{cbTx, tx})
 	assert.NoError(t, err)
 	assert.NotNil(t, newBlock)
 
@@ -139,7 +140,8 @@ func TestNewBlockchainAndAddBlock(t *testing.T) {
 	tx, err := NewCoinbaseTX(addr, "")
 	assert.NoError(t, err)
 	txs := []*Transaction{tx}
-	newBlock := NewBlock(txs, prevTip, bestHeight+1)
+	newBlock, err := NewBlock(context.Background(), txs, prevTip, bestHeight+1, 0)
+	assert.NoError(t, err)
 
 	// Add block to database
 	err = bc.AddBlock(newBlock)
@@ -156,7 +158,8 @@ func TestNewBlockchainAndAddBlock(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Try adding a block with a lower height
-	lowerBlock := NewBlock(txs, prevTip, bestHeight)
+	lowerBlock, err := NewBlock(context.Background(), txs, prevTip, bestHeight, 0)
+	assert.NoError(t, err)
 	err = bc.AddBlock(lowerBlock)
 	assert.NoError(t, err)
 
@@ -200,6 +203,6 @@ func TestBlockchainErrors(t *testing.T) {
 		ID:  []byte("invalid_tx"),
 		Vin: []TXInput{{Txid: []byte("parent"), Vout: 0}},
 	}
-	_, err = bc.MineBlock([]*Transaction{invalidTx})
+	_, err = bc.MineBlock(context.Background(), []*Transaction{invalidTx})
 	assert.Error(t, err)
 }

@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"encoding/hex"
 	"errors"
@@ -217,7 +218,7 @@ func (bc *Blockchain) GetBlockHashes() [][]byte {
 }
 
 // MineBlock mines a new block with the provided transactions
-func (bc *Blockchain) MineBlock(transactions []*Transaction) (*Block, error) {
+func (bc *Blockchain) MineBlock(ctx context.Context, transactions []*Transaction) (*Block, error) {
 	for _, tx := range transactions {
 		valid, err := bc.VerifyTransaction(tx)
 		if err != nil {
@@ -242,7 +243,32 @@ func (bc *Blockchain) MineBlock(transactions []*Transaction) (*Block, error) {
 		return nil, fmt.Errorf("failed to deserialize last block: %w", err)
 	}
 
-	newBlock := NewBlock(transactions, lastHash, lastBlock.Height+1)
+	newBits := lastBlock.Bits
+	if newBits == 0 {
+		newBits = targetBits
+	}
+	newHeight := lastBlock.Height + 1
+	if newHeight%difficultyAdjustmentInterval == 0 {
+		// Find anchor block by traversing back
+		anchorBlock := lastBlock
+		for anchorBlock.Height > newHeight-difficultyAdjustmentInterval {
+			prevBlockData, err := bc.db.GetBlock(anchorBlock.PrevBlockHash)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get ancestor block: %w", err)
+			}
+			prevBlock, err := DeserializeBlock(prevBlockData)
+			if err != nil {
+				return nil, fmt.Errorf("failed to deserialize ancestor block: %w", err)
+			}
+			anchorBlock = prevBlock
+		}
+		newBits = CalculateNewDifficulty(lastBlock, anchorBlock)
+	}
+
+	newBlock, err := NewBlock(ctx, transactions, lastHash, newHeight, newBits)
+	if err != nil {
+		return nil, err
+	}
 
 	err = bc.db.SaveBlockAndTip(newBlock.Hash, newBlock.Serialize())
 	if err != nil {
