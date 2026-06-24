@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -10,8 +11,10 @@ import (
 )
 
 const (
-	maxNonce   = math.MaxInt64
-	targetBits = 16
+	maxNonce                     = math.MaxInt64
+	targetBits                   = 16
+	difficultyAdjustmentInterval = 10  // Adjust difficulty every 10 blocks
+	targetBlockTimeSeconds       = 600 // Target 10 minutes per block (600 seconds)
 )
 
 // ProofOfWork represents a proof-of-work
@@ -23,7 +26,11 @@ type ProofOfWork struct {
 // NewProofOfWork builds and returns a ProofOfWork
 func NewProofOfWork(b *Block) *ProofOfWork {
 	target := big.NewInt(1)
-	target.Lsh(target, uint(256-targetBits))
+	bits := b.Bits
+	if bits == 0 {
+		bits = targetBits
+	}
+	target.Lsh(target, uint(256-bits))
 
 	pow := &ProofOfWork{
 		block:  b,
@@ -34,12 +41,16 @@ func NewProofOfWork(b *Block) *ProofOfWork {
 }
 
 func (pow *ProofOfWork) prepareData(nonce int, txHash []byte) []byte {
+	bits := pow.block.Bits
+	if bits == 0 {
+		bits = targetBits
+	}
 	data := bytes.Join(
 		[][]byte{
 			pow.block.PrevBlockHash,
 			txHash,
 			IntToHex(pow.block.Timestamp),
-			IntToHex(int64(targetBits)),
+			IntToHex(int64(bits)),
 			IntToHex(int64(nonce)),
 		},
 		[]byte{},
@@ -49,7 +60,7 @@ func (pow *ProofOfWork) prepareData(nonce int, txHash []byte) []byte {
 }
 
 // Run performs a proof-of-work
-func (pow *ProofOfWork) Run() (int, []byte, error) {
+func (pow *ProofOfWork) Run(ctx context.Context) (int, []byte, error) {
 	var hashInt big.Int
 	var hash [32]byte
 	nonce := 0
@@ -62,6 +73,16 @@ func (pow *ProofOfWork) Run() (int, []byte, error) {
 
 	fmt.Printf("Mining a new block")
 	for nonce < maxNonce {
+		// Check for context cancellation every 1000 iterations to avoid select statement overhead
+		if nonce%1000 == 0 {
+			select {
+			case <-ctx.Done():
+				fmt.Print("\nMining cancelled\n")
+				return 0, nil, ctx.Err()
+			default:
+			}
+		}
+
 		data := pow.prepareData(nonce, txHash)
 
 		hash = sha256.Sum256(data)
@@ -93,4 +114,35 @@ func (pow *ProofOfWork) Validate() bool {
 	isValid := hashInt.Cmp(pow.target) == -1
 
 	return isValid
+}
+
+// CalculateNewDifficulty calculates the new difficulty target bits.
+// Since we store difficulty in bits (leading zeroes), each increment
+// doubles the difficulty. We adjust by +/-1 bit to prevent wild shifts.
+func CalculateNewDifficulty(lastBlock, anchorBlock *Block) int {
+	if lastBlock.Height%difficultyAdjustmentInterval != 0 {
+		return lastBlock.Bits
+	}
+
+	actualTime := lastBlock.Timestamp - anchorBlock.Timestamp
+	targetTime := int64(difficultyAdjustmentInterval * targetBlockTimeSeconds)
+
+	newBits := lastBlock.Bits
+	if actualTime < targetTime/2 {
+		// Blocks mined too fast -> increase difficulty (more leading zeroes)
+		newBits++
+	} else if actualTime > targetTime*2 {
+		// Blocks mined too slow -> decrease difficulty (fewer leading zeroes)
+		newBits--
+	}
+
+	// Prevent difficulty from dropping too low or rising too high for safety/demo
+	if newBits < 8 {
+		newBits = 8
+	}
+	if newBits > 24 {
+		newBits = 24
+	}
+
+	return newBits
 }
