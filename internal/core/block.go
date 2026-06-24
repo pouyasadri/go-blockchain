@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"encoding/gob"
 	"errors"
 	"fmt"
@@ -16,10 +17,14 @@ type Block struct {
 	Hash          []byte
 	Nonce         int
 	Height        int
+	Bits          int
 }
 
 // NewBlock creates and returns Block
-func NewBlock(transactions []*Transaction, prevBlockHash []byte, height int) *Block {
+func NewBlock(ctx context.Context, transactions []*Transaction, prevBlockHash []byte, height int, bits int) (*Block, error) {
+	if bits == 0 {
+		bits = targetBits
+	}
 	block := &Block{
 		Timestamp:     time.Now().Unix(),
 		Transactions:  transactions,
@@ -27,24 +32,27 @@ func NewBlock(transactions []*Transaction, prevBlockHash []byte, height int) *Bl
 		Hash:          []byte{},
 		Nonce:         0,
 		Height:        height,
+		Bits:          bits,
 	}
 	pow := NewProofOfWork(block)
-	nonce, hash, err := pow.Run()
+	nonce, hash, err := pow.Run(ctx)
 	if err != nil {
-		// Proof-of-work failure is unrecoverable during block construction.
-		// This should only happen if the transaction set is empty.
-		panic(fmt.Sprintf("proof-of-work failed: %v", err))
+		return nil, err
 	}
 
 	block.Hash = hash[:]
 	block.Nonce = nonce
 
-	return block
+	return block, nil
 }
 
 // NewGenesisBlock creates and returns genesis Block
 func NewGenesisBlock(coinbase *Transaction) *Block {
-	return NewBlock([]*Transaction{coinbase}, []byte{}, 0)
+	block, err := NewBlock(context.Background(), []*Transaction{coinbase}, []byte{}, 0, targetBits)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create genesis block: %v", err))
+	}
+	return block
 }
 
 // HashTransactions returns a hash of the transactions in the block

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,7 +16,8 @@ func TestBlock(t *testing.T) {
 	tx := &Transaction{nil, []TXInput{txin}, []TXOutput{*txout}}
 	tx.ID = tx.Hash()
 
-	block := NewBlock([]*Transaction{tx}, []byte("prevhash"), 1)
+	block, err := NewBlock(context.Background(), []*Transaction{tx}, []byte("prevhash"), 1, 0)
+	assert.NoError(t, err)
 	assert.NotNil(t, block)
 	assert.Equal(t, []byte("prevhash"), block.PrevBlockHash)
 	assert.Equal(t, 1, block.Height)
