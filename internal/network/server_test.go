@@ -145,7 +145,11 @@ func TestServerStartAndCommands(t *testing.T) {
 	assert.NoError(t, conn6.Close())
 
 	// Manually populate mempool to avoid async race condition for getdata
-	server.mempool[hex.EncodeToString(txn.ID)] = *txn
+	decTx, err := core.DeserializeTransaction(txn.Serialize())
+	assert.NoError(t, err)
+	server.mu.Lock()
+	server.mempool[hex.EncodeToString(txn.ID)] = decTx
+	server.mu.Unlock()
 
 	// GetData tx command
 	connX, err := net.Dial("tcp", "localhost:5000")
@@ -157,10 +161,13 @@ func TestServerStartAndCommands(t *testing.T) {
 	assert.NoError(t, connX.Close())
 
 	// Block command
+	server.mu.Lock()
 	server.blocksInTransit = [][]byte{[]byte("dummy_hash")}
+	server.mu.Unlock()
 	conn7, err := net.Dial("tcp", "localhost:5000")
 	assert.NoError(t, err)
-	newBlock := core.NewBlock([]*core.Transaction{txn}, []byte("prevhash"), 1)
+	newBlock, err := core.NewBlock(context.Background(), []*core.Transaction{txn}, []byte("prevhash"), 1, 0)
+	assert.NoError(t, err)
 	blockPayload := gobEncode(block{AddrFrom: "localhost:5001", Block: newBlock.Serialize()})
 	req7 := append(commandToBytes("block"), blockPayload...)
 	_, err = io.Copy(conn7, bytes.NewReader(req7))
@@ -212,11 +219,15 @@ func TestSendTxToKnownNodes(t *testing.T) {
 	server.SendTxToKnownNodes(txn)
 
 	// 2. nodeAddress == knownNodes[0] (should sendInv to all other nodes)
+	server.mu.Lock()
 	server.knownNodes = []string{server.nodeAddress, "localhost:5555"}
+	server.mu.Unlock()
 	server.SendTxToKnownNodes(txn)
 
 	// 3. nodeAddress != knownNodes[0] (should sendTx to knownNodes[0])
+	server.mu.Lock()
 	server.knownNodes = []string{"localhost:5555"}
+	server.mu.Unlock()
 	server.SendTxToKnownNodes(txn)
 }
 
@@ -278,8 +289,10 @@ func TestServerHandleTxMining(t *testing.T) {
 	assert.NotNil(t, server)
 
 	// Set mining address and known nodes
+	server.mu.Lock()
 	server.miningAddress = walletAddr
 	server.knownNodes = []string{"localhost:8001", "localhost:8000"}
+	server.mu.Unlock()
 
 	// Send two transaction commands to trigger mining block
 	txn1, err := core.NewCoinbaseTX(walletAddr, "coinbase1")
@@ -315,7 +328,9 @@ func TestServerHelpers(t *testing.T) {
 	assert.NotNil(t, server)
 
 	// 1. nodeIsKnown true test
+	server.mu.Lock()
 	server.knownNodes = []string{"localhost:9000"}
+	server.mu.Unlock()
 	assert.True(t, server.nodeIsKnown("localhost:9000"))
 	assert.False(t, server.nodeIsKnown("localhost:9001"))
 
@@ -387,7 +402,8 @@ func TestServerExtraCoverage(t *testing.T) {
 	// 8. handleBlock AddBlock fails
 	cbTx, err := core.NewCoinbaseTX(walletAddr, "test")
 	assert.NoError(t, err)
-	validBlock := core.NewBlock([]*core.Transaction{cbTx}, []byte("prevhash"), 1)
+	validBlock, err := core.NewBlock(context.Background(), []*core.Transaction{cbTx}, []byte("prevhash"), 1, 0)
+	assert.NoError(t, err)
 	blockPayload2 := gobEncode(block{AddrFrom: "localhost:8501", Block: validBlock.Serialize()})
 	req5 := append(commandToBytes("block"), blockPayload2...)
 	server.handleBlock(req5)

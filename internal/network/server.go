@@ -5,14 +5,17 @@ import (
 	"context"
 	"encoding/gob"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/pouyasadri/go-blockchain/internal/core"
+	"github.com/pouyasadri/go-blockchain/internal/metrics"
 )
 
 const protocol = "tcp"
@@ -58,6 +61,8 @@ type verzion struct {
 // Server represents a P2P node in the network
 type Server struct {
 	mu              sync.RWMutex
+	ctx             context.Context
+	miningCancel    context.CancelFunc
 	nodeAddress     string
 	miningAddress   string
 	knownNodes      []string
@@ -119,6 +124,7 @@ func (s *Server) sendData(addr string, data []byte) {
 	conn, err := net.Dial(protocol, addr)
 	if err != nil {
 		s.logger.Warn("node is not available", "addr", addr)
+		s.mu.Lock()
 		var updatedNodes []string
 		for _, node := range s.knownNodes {
 			if node != addr {
@@ -126,6 +132,9 @@ func (s *Server) sendData(addr string, data []byte) {
 			}
 		}
 		s.knownNodes = updatedNodes
+		peersCount := len(s.knownNodes)
+		s.mu.Unlock()
+		metrics.ConnectedPeers.Set(float64(peersCount))
 		return
 	}
 	defer func() {
@@ -203,6 +212,7 @@ func (s *Server) handleAddr(request []byte) {
 	}
 	count := len(s.knownNodes)
 	s.mu.Unlock()
+	metrics.ConnectedPeers.Set(float64(count))
 
 	s.logger.Info("known nodes updated", "count", count)
 	s.requestBlocks()
@@ -233,8 +243,20 @@ func (s *Server) handleBlock(request []byte) {
 		s.logger.Error("failed to add block", "error", err)
 		return
 	}
+	metrics.BlockchainHeight.Set(float64(b.Height))
 
 	s.mu.Lock()
+	if s.miningCancel != nil {
+		s.logger.Info("cancelling current mining operation as new block was added to chain")
+		s.miningCancel()
+		s.miningCancel = nil
+	}
+
+	for _, tx := range b.Transactions {
+		delete(s.mempool, hex.EncodeToString(tx.ID))
+	}
+	metrics.MempoolSize.Set(float64(len(s.mempool)))
+
 	if len(s.blocksInTransit) > 0 {
 		blockHash := s.blocksInTransit[0]
 		s.blocksInTransit = s.blocksInTransit[1:]
@@ -329,7 +351,9 @@ func (s *Server) handleGetData(request []byte) {
 
 	if payload.Type == "tx" {
 		txID := hex.EncodeToString(payload.ID)
+		s.mu.RLock()
 		tx, ok := s.mempool[txID]
+		s.mu.RUnlock()
 		if ok {
 			s.sendTx(payload.AddrFrom, &tx)
 		}
@@ -357,7 +381,10 @@ func (s *Server) handleTx(request []byte) {
 
 	s.mu.Lock()
 	s.mempool[hex.EncodeToString(newTx.ID)] = newTx
+	mempoolLen := len(s.mempool)
 	s.mu.Unlock()
+	metrics.MempoolSize.Set(float64(mempoolLen))
+	metrics.TransactionsReceived.Inc()
 
 	s.mu.RLock()
 	isFirstNode := len(s.knownNodes) > 0 && s.nodeAddress == s.knownNodes[0]
@@ -411,11 +438,41 @@ func (s *Server) handleTx(request []byte) {
 		}
 		txs = append(txs, cbTx)
 
-		newBlock, err := s.bc.MineBlock(txs)
+		s.mu.Lock()
+		if s.miningCancel != nil {
+			s.miningCancel()
+		}
+		srvCtx := s.ctx
+		if srvCtx == nil {
+			srvCtx = context.Background()
+		}
+		miningCtx, cancel := context.WithCancel(srvCtx)
+		s.miningCancel = cancel
+		s.mu.Unlock()
+
+		startTime := time.Now()
+		newBlock, err := s.bc.MineBlock(miningCtx, txs)
+
+		s.mu.Lock()
+		if s.miningCancel != nil {
+			s.miningCancel()
+			s.miningCancel = nil
+		}
+		s.mu.Unlock()
+
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				s.logger.Info("mining cancelled: context done")
+				break
+			}
 			s.logger.Error("failed to mine block", "error", err)
 			break
 		}
+
+		metrics.MiningDuration.Observe(time.Since(startTime).Seconds())
+		metrics.BlocksMined.Inc()
+		metrics.BlockchainHeight.Set(float64(newBlock.Height))
+
 		UTXOSet := core.UTXOSet{Blockchain: s.bc}
 		if rerr := UTXOSet.Reindex(); rerr != nil {
 			s.logger.Error("failed to reindex utxoset after mining", "error", rerr)
@@ -427,7 +484,9 @@ func (s *Server) handleTx(request []byte) {
 		for _, t := range txs {
 			delete(s.mempool, hex.EncodeToString(t.ID))
 		}
+		mempoolLen := len(s.mempool)
 		s.mu.Unlock()
+		metrics.MempoolSize.Set(float64(mempoolLen))
 
 		s.mu.RLock()
 		nodes := make([]string, len(s.knownNodes))
@@ -470,7 +529,9 @@ func (s *Server) handleVersion(request []byte) {
 	if !s.nodeIsKnownLocked(payload.AddrFrom) {
 		s.knownNodes = append(s.knownNodes, payload.AddrFrom)
 	}
+	peersCount := len(s.knownNodes)
 	s.mu.Unlock()
+	metrics.ConnectedPeers.Set(float64(peersCount))
 }
 
 func (s *Server) handleConnection(conn net.Conn) {
@@ -514,6 +575,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 // Start starts the P2P server and blocks until context is cancelled
 func (s *Server) Start(ctx context.Context) {
+	s.mu.Lock()
+	s.ctx = ctx
+	s.mu.Unlock()
+
 	ln, err := net.Listen(protocol, s.nodeAddress)
 	if err != nil {
 		s.logger.Error("failed to start server", "error", err)
@@ -530,6 +595,16 @@ func (s *Server) Start(ctx context.Context) {
 	}
 
 	s.logger.Info("server started", "address", s.nodeAddress)
+	bestHeight, err := s.bc.GetBestHeight()
+	if err == nil {
+		metrics.BlockchainHeight.Set(float64(bestHeight))
+	}
+	s.mu.RLock()
+	peersCount := len(s.knownNodes)
+	mempoolLen := len(s.mempool)
+	s.mu.RUnlock()
+	metrics.ConnectedPeers.Set(float64(peersCount))
+	metrics.MempoolSize.Set(float64(mempoolLen))
 
 	go func() {
 		<-ctx.Done()
@@ -601,4 +676,26 @@ func (s *Server) SendTxToKnownNodes(tx *core.Transaction) {
 	} else {
 		s.sendTx(nodes[0], tx)
 	}
+}
+
+// MempoolSnapshot returns a copy of the transactions currently in the mempool.
+func (s *Server) MempoolSnapshot() []core.Transaction {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	txs := make([]core.Transaction, 0, len(s.mempool))
+	for _, tx := range s.mempool {
+		txs = append(txs, tx)
+	}
+	return txs
+}
+
+// GetKnownNodes returns a copy of the known P2P node addresses.
+func (s *Server) GetKnownNodes() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	nodes := make([]string, len(s.knownNodes))
+	copy(nodes, s.knownNodes)
+	return nodes
 }
