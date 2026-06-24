@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"syscall"
 
+	"github.com/pouyasadri/go-blockchain/internal/api"
 	"github.com/pouyasadri/go-blockchain/internal/core"
 	"github.com/pouyasadri/go-blockchain/internal/network"
 	"github.com/pouyasadri/go-blockchain/internal/storage/bolt"
@@ -272,7 +273,7 @@ func Execute(args []string, out io.Writer) error {
 				}
 				txs := []*core.Transaction{cbTx, tx}
 
-				newBlock, err := bc.MineBlock(txs)
+				newBlock, err := bc.MineBlock(cmd.Context(), txs)
 				if err != nil {
 					return fmt.Errorf("failed to mine block: %w", err)
 				}
@@ -303,6 +304,7 @@ func Execute(args []string, out io.Writer) error {
 			defer stop()
 
 			miner, _ := cmd.Flags().GetString("miner")
+			apiAddr, _ := cmd.Flags().GetString("api-addr")
 
 			if miner != "" && !core.ValidateAddress(miner) {
 				return fmt.Errorf("ERROR: Miner address is not valid")
@@ -323,11 +325,21 @@ func Execute(args []string, out io.Writer) error {
 
 			logger := slog.New(slog.NewTextHandler(out, nil))
 			server := network.NewServer(nodeID, miner, bc, logger)
+
+			apiServer := api.NewAPIServer(bc, server)
+			go func() {
+				logger.Info("starting API server", "addr", apiAddr)
+				if err := apiServer.Start(ctx, apiAddr); err != nil {
+					logger.Error("API server error", "error", err)
+				}
+			}()
+
 			server.Start(ctx)
 			return nil
 		},
 	}
 	startNodeCmd.Flags().String("miner", "", "Enable mining mode and send reward to ADDRESS")
+	startNodeCmd.Flags().String("api-addr", ":8080", "Address to run the HTTP API server on")
 
 	rootCmd.AddCommand(createBlockchainCmd, createWalletCmd, getBalanceCmd, listAddressesCmd, printChainCmd, reindexUTXOCmd, sendCmd, startNodeCmd)
 
