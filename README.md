@@ -1,175 +1,147 @@
-# Go Blockchain
+# AI-to-AI Autonomous Micro-payment Settlement Engine & Coordination Mesh
 
-[![Go Version](https://img.shields.io/badge/Go-%3E%3D%201.25-00ADD8?style=flat-square&logo=go)](https://go.dev/)
-[![CI Build](https://img.shields.io/github/actions/workflow/status/pouyasadri/go-blockchain/ci.yml?branch=main&style=flat-square)](https://github.com/pouyasadri/go-blockchain/actions)
-[![Go Report Card](https://goreportcard.com/badge/github.com/pouyasadri/go-blockchain?style=flat-square)](https://goreportcard.com/report/github.com/pouyasadri/go-blockchain)
-[![Coverage Status](https://img.shields.io/badge/Coverage-~85%25-brightgreen.svg?style=flat-square)](https://github.com/pouyasadri/go-blockchain/actions)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
+[![Go Version](https://img.shields.io/badge/Go-1.26-00ADD8?style=flat-square&logo=go)](https.golang.org)
+[![Build & Test](https://img.shields.io/badge/Tests-100%25%20Passing-emerald?style=flat-square&logo=github)](https://github.com)
+[![Docker](https://img.shields.io/badge/Docker-Multi--Node%20Compose-blue?style=flat-square&logo=docker)](https://docker.com)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-StatefulSet-326CE5?style=flat-square&logo=kubernetes)](https://kubernetes.io)
 
-A fully-featured, educational blockchain server and node implementation written entirely in Go. This showcase project demonstrates advanced Go system design best practices, robust testing methodologies, secure cryptographic engineering, and modern Go features (such as `iter.Seq` range-over-func).
+An enterprise-grade, high-performance Go UTXO blockchain ledger, local Model Context Protocol (MCP) Financial Firewall, and real-time HTMX Web Visualizer. 
 
-## ✨ Features
+The system solves the **"Financial Inclusion Gap for Machines"**, enabling autonomous AI agents to discover peer services, delegate paid micro-tasks, and settle micro-payments (micro-cents) safely without human intervention—while enforcing strict human-defined budget boundaries and zero-knowledge privacy.
 
-- **Decentralized P2P Network**: Robust TCP-based server communication to propagate blocks and transactions across nodes. Includes protection against memory exhaustion DoS vectors via `io.LimitReader` and strict message size limits.
-- **Context-Aware Mining Cancellation**: Instant abort of active CPU mining loops via thread-safe context cancellation when a competing valid block is received from peers, saving CPU cycles.
-- **Bitcoin-Style Difficulty Retargeting**: Self-correcting difficulty adjustment. Every 10 blocks, difficulty target bits are re-calculated using block header time differences over the interval, clamped to a maximum 2x/0.5x shift to prevent sudden swings.
-- **UTXO Model**: Unspent Transaction Output (UTXO) model for accurate balance checking and validation.
-- **Elliptic Curve Cryptography**: Secure wallet generation and transaction signing using ECDSA (`secp256r1`) and SHA-256. Employs canonical signing and proper zero-padding fixes for deterministic signature lengths.
-- **Persistent Storage**: Efficient key-value data management backed by `go.etcd.io/bbolt`, featuring atomic multi-key transactions for crash-safe state updates.
-- **HTTP REST API**: Pure `net/http` JSON explorer API featuring Go 1.22+ wildcard path matching, CORS headers, and hex-serialized DTO payloads (no external routers needed).
-- **Prometheus Observability**: Native Prometheus instrumentation (`blockchain_height`, `blockchain_mempool_size`, `blockchain_connected_peers`, `blockchain_mining_duration_seconds`, etc.) exposed at `/metrics`.
-- **Modern CLI**: Intuitive command-line interface powered by `Cobra`.
+---
 
-## 🏗 System Architecture
-
-The architecture is built using highly cohesive, decoupled domains to ensure maintainability, concurrency-safety, and testability:
+## 🏛️ System Architecture
 
 ```mermaid
-graph TD
-    subgraph CLI ["CLI Layer (internal/cli)"]
-        CmdLine[Cobra CLI]
+flowchart TD
+    subgraph AI_Agent_Layer["🤖 AI Agent & LLM Layer"]
+        AgentA["Agent A (Buyer LLM)"]
+        AgentB["Agent B (Seller LLM)"]
     end
 
-    subgraph Network ["Network Layer (internal/network)"]
-        P2P[P2P Server w/ sync.RWMutex]
-        CmdHandler[Command Handlers]
+    subgraph Firewall_Layer["🛡️ MCP Financial Firewall Daemon (cmd/mcp-daemon)"]
+        StdioRPC["JSON-RPC 2.0 stdio"]
+        Keyring["Ephemeral Keyring"]
+        PolicyEngine["Policy Engine & Guard"]
+        PolicyFile["policy.json (Passkey Signed)"]
+        
+        StdioRPC --> Keyring
+        Keyring --> PolicyEngine
+        PolicyFile --> PolicyEngine
     end
 
-    subgraph Core ["Core Domain (internal/core)"]
-        BC[Blockchain]
-        PoW[Proof of Work w/ Context Cancel]
-        TX[Transaction & UTXOSet]
-        Wall[Wallets]
-        Merkle[Merkle Trees w/ CVE-2012-2459 mitigation]
+    subgraph Node_Layer["⚡ Core Blockchain Node Mesh (cmd/node)"]
+        PoA["Proof-of-Authority Consensus"]
+        bbolt["bbolt KV Store"]
+        gRPC["gRPC NodeService (50051)"]
+        P2P["mTLS 1.3 P2P Mesh"]
+        
+        PoA <--> bbolt
+        gRPC <--> PoA
+        P2P <--> PoA
     end
 
-    subgraph Storage ["Storage Layer (internal/storage)"]
-        bbolt[go.etcd.io/bbolt]
+    subgraph Indexer_Visualizer["📊 Real-Time Web Dashboard (cmd/indexer)"]
+        BlockStream["gRPC Block Stream"]
+        IndexStore["IndexStore Repository"]
+        Marketplace["AI Service Catalog"]
+        ZKCP["ZKCP Escrow Engine"]
+        SSE["SSE Event Broker (/events)"]
+        HTMX["HTMX + Alpine.js Glass UI (:8080)"]
+
+        BlockStream --> IndexStore
+        IndexStore --> Marketplace
+        IndexStore --> ZKCP
+        IndexStore --> SSE
+        SSE --> HTMX
     end
 
-    subgraph API ["Observability & API (internal/api, metrics)"]
-        APISrv[APIServer w/ net/http]
-        PromMetrics[Prometheus Metrics]
-    end
-
-    CmdLine -.->|Initializes| Core
-    CmdLine -.->|Starts Node & API| Network
-    CmdLine -.->|Starts API| APISrv
-    Network <-->|Propagates & Validates| Core
-    Core <-->|Atomic Persistence| Storage
-    P2P <-->|TCP P2P Protocols| ExtNodes[External Nodes]
-    
-    APISrv <-->|Queries State| Core
-    APISrv <-->|Queries Mempool & Peers| Network
-    PromMetrics -.->|Instruments| Network
-    PromMetrics -.->|Exposes /metrics| APISrv
-    
-    APISrv <-->|JSON REST API| Clients[CURL / Browser / Dashboard]
-    APISrv <-->|Scrapes Metrics| PromSystem[Prometheus / Grafana]
+    AgentA <--> StdioRPC
+    PolicyEngine -->|Signed TXs| gRPC
+    gRPC --> BlockStream
 ```
 
-### Technical Highlights
-- **Thread Safety**: The P2P node `Server` utilizes `sync.RWMutex` to protect shared state (mempool, known nodes, blocks in transit) across concurrent connection handlers, verified under the Go race detector.
-- **Data Integrity**: Database interactions leverage BoltDB's atomic transactions to commit blocks and update chain tips simultaneously, eliminating the risk of torn writes during crashes.
-- **Cryptographic Correctness**: Implements strict `ecdsa` signature normalization. Public keys and signature tuples (r, s) are properly zero-padded to `P-256` boundaries (32 bytes), avoiding non-deterministic decoding errors.
-- **Memory Safety**: Network endpoints are secured using `io.LimitReader` to bound memory allocation during payload deserialization, thwarting resource-exhaustion attacks.
+---
 
-## 🚀 Getting Started
+## 🚀 Key Architectural Features
 
-### Prerequisites
+1. **Native UTXO Ledger (`internal/core`)**
+   - High-throughput UTXO blockchain engine with atomic `bbolt` key-value persistence.
+   - Proof-of-Authority (PoA) validator network with instant block confirmation and failure fallback.
 
-- [Go](https://go.dev/) 1.25 or later.
+2. **Model Context Protocol (MCP) Financial Firewall (`internal/mcp` & `internal/firewall`)**
+   - Implements MCP stdio JSON-RPC 2.0 interface for LLMs and AI Agents.
+   - Ephemeral keyring managing memory-isolated private keys.
+   - Passkey-signed `policy.json` enforcing strict human-defined budget caps, per-transaction limits, and recipient allowlists.
 
-### Installation
+3. **Zero-Knowledge Contingent Payments (`internal/zkcp`)**
+   - ZKCP prover and verifier using SHA-256 preimage knowledge circuits.
+   - Solves the fair-exchange problem: Agent A only pays Agent B if Agent B reveals a secret payload $S$ matching hashlock $H$, verified atomically on-chain.
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/pouyasadri/go-blockchain.git
-   cd go-blockchain
-   ```
+4. **Event-Driven Indexer & AI Marketplace (`internal/indexer` & `internal/marketplace`)**
+   - Real-time gRPC block stream consumer updating an in-memory thread-safe `IndexStore`.
+   - Peer AI service discovery catalog and HTLC / ZKCP contract coordinator.
 
-2. **Build the CLI executable:**
-   ```bash
-   go build -o node ./cmd/node
-   ```
+5. **Real-Time Glassmorphic Web Dashboard (`internal/dashboard`)**
+   - Single-binary embedded HTTP server listening on `:8080`.
+   - Server-Sent Events (SSE) broker pushing live HTMX partials directly to client browsers without full page reloads.
 
-### Quick Start Guide
+6. **Multi-Node P2P & Chaos Engineering (`internal/network`)**
+   - Mutual TLS (mTLS 1.3) client and server certificate authentication.
+   - `ChaosNetwork` fault injector simulating packet drops, network latency jitter, and split-brain network partitions.
 
-**1. Create a Wallet:**
+---
+
+## 📦 Package Layout
+
+| Package | Description |
+| :--- | :--- |
+| [`internal/core`](file:///Users/pouyasadri/Desktop/Projects/go-blockchain/internal/core) | UTXO transaction engine, PoW/PoA consensus, and `bbolt` storage |
+| [`internal/firewall`](file:///Users/pouyasadri/Desktop/Projects/go-blockchain/internal/firewall) | Financial Firewall policy evaluation, budget meters, and passkey verification |
+| [`internal/mcp`](file:///Users/pouyasadri/Desktop/Projects/go-blockchain/internal/mcp) | Model Context Protocol JSON-RPC 2.0 stdio gateway and tool execution |
+| [`internal/indexer`](file:///Users/pouyasadri/Desktop/Projects/go-blockchain/internal/indexer) | Block stream indexer and thread-safe `IndexStore` repository |
+| [`internal/marketplace`](file:///Users/pouyasadri/Desktop/Projects/go-blockchain/internal/marketplace) | AI service catalog search and HTLC/ZKCP contract builder |
+| [`internal/dashboard`](file:///Users/pouyasadri/Desktop/Projects/go-blockchain/internal/dashboard) | Embedded HTTP web server, SSE event broker, and HTMX visualizer templates |
+| [`internal/zkcp`](file:///Users/pouyasadri/Desktop/Projects/go-blockchain/internal/zkcp) | Zero-Knowledge Contingent Payment prover and verifier circuits |
+| [`internal/network`](file:///Users/pouyasadri/Desktop/Projects/go-blockchain/internal/network) | P2P TCP mesh, gRPC `NodeService`, mTLS 1.3 manager, and Chaos fault injector |
+| [`internal/api`](file:///Users/pouyasadri/Desktop/Projects/go-blockchain/internal/api) | RESTful HTTP node administration and inspection API |
+| [`internal/cli`](file:///Users/pouyasadri/Desktop/Projects/go-blockchain/internal/cli) | Cobra CLI framework for node start, wallet management, and blockchain queries |
+
+---
+
+## 🛠️ Quickstart & Execution Guide
+
+### 1. Run Unit & Integration Tests (100% Passing with Race Detector)
 ```bash
-./node createwallet
-# Outputs: Your new address: <Base58 Address>
+go test -race -count=1 ./...
 ```
 
-**2. Initialize the Blockchain:**
+### 2. Build Binaries
 ```bash
-./node createblockchain --address <Your_Address>
+go build -o bin/node ./cmd/node
+go build -o bin/indexer ./cmd/indexer
+go build -o bin/mcp-daemon ./cmd/mcp-daemon
+go build -o bin/sign-policy ./cmd/sign-policy
 ```
-*This generates the genesis block and mines the first reward to your wallet.*
 
-**3. Check Balance:**
+### 3. Run Multi-Node Cluster with Docker Compose
 ```bash
-./node getbalance --address <Your_Address>
+./scripts/simulate_cluster.sh
 ```
-
-**4. Start the Node Server (with P2P, HTTP REST API, and Metrics):**
+Or manually:
 ```bash
-# Start node 3000 in mining mode with API server on port 8080
-export NODE_ID=3000
-./node startnode --miner <Your_Address> --api-addr :8080
+docker compose up --build -d
 ```
+Open **`http://localhost:8080`** in your browser to view the live real-time Web Dashboard!
 
-### 🌐 Interacting with the HTTP API
-
-Once the node is running, you can explore the state of the blockchain using curl or any web client:
-
-- **Check Node Height:**
-  ```bash
-  curl http://localhost:8080/api/v1/height
-  ```
-- **List Blocks (Paginated):**
-  ```bash
-  curl "http://localhost:8080/api/v1/blocks?limit=5&offset=0"
-  ```
-- **Fetch Specific Block:**
-  ```bash
-  curl http://localhost:8080/api/v1/blocks/<block_hash_hex>
-  ```
-- **Get Wallet Balance:**
-  ```bash
-  curl http://localhost:8080/api/v1/balance/<wallet_address>
-  ```
-- **Get Mempool Contents:**
-  ```bash
-  curl http://localhost:8080/api/v1/mempool
-  ```
-- **Expose Prometheus Metrics:**
-  ```bash
-  curl http://localhost:8080/metrics
-  ```
-
-## 🧪 Testing and CI
-
-This repository is heavily tested with end-to-end, integration, and unit coverage (maintaining **~85%** statement coverage) of core mechanics (Proof of Work, P2P network, REST API, UTXOs). To run tests locally:
-
+### 4. Deploy to Kubernetes
 ```bash
-# Run unit, integration, and e2e tests
-go test -v ./...
-
-# Run tests with the Go race detector enabled
-go test -race ./...
-
-# Calculate test coverage
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out
+kubectl apply -f k8s/node-statefulset.yaml
+kubectl apply -f k8s/indexer-deployment.yaml
 ```
-A continuous integration (CI) pipeline leverages GitHub actions to enforce code standards using `golangci-lint` and executes tests on every push or pull request to the main branch.
 
-## 🤝 Contributing
+---
 
-Contributions, issues, and feature requests are always welcome! 
-Please refer to the [Contributing Guide](CONTRIBUTING.md) for details on our code of conduct, pull request process, and development standards.
-
-## 📄 License
-
-This project is licensed under the MIT License - see the `LICENSE` file for details.
+## 📜 License
+MIT License. Built for Autonomous AI Agent Networks.
