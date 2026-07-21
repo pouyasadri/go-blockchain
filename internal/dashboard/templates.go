@@ -435,28 +435,51 @@ func RenderServicesPartial(w io.Writer, services []*indexer.AgentService) {
 
 // RenderFirewallPartial renders firewall budget usage
 func RenderFirewallPartial(w io.Writer, sessionBudget, spent int64) {
+	pct := 0
+	if sessionBudget > 0 {
+		pct = int((float64(spent) / float64(sessionBudget)) * 100)
+		if pct > 100 {
+			pct = 100
+		}
+	}
 	remaining := sessionBudget - spent
 	if remaining < 0 {
 		remaining = 0
 	}
-	pct := float64(spent) / float64(sessionBudget) * 100
-	if pct > 100 {
-		pct = 100
-	}
 
 	html := fmt.Sprintf(`
-	<div class="space-y-4">
-		<div class="flex justify-between items-center text-xs font-semibold">
-			<span class="text-slate-400">Session Expenditure</span>
-			<span class="text-indigo-400 font-bold font-mono text-sm">%d / %d μ-cents</span>
+	<div class="glass-card rounded-3xl p-6 border border-slate-800/80 relative overflow-hidden group">
+		<div class="absolute -right-10 -bottom-10 w-40 h-40 bg-indigo-600/10 rounded-full blur-3xl group-hover:bg-indigo-600/20 transition-all"></div>
+		
+		<div class="flex items-center justify-between mb-4">
+			<div class="flex items-center gap-3">
+				<div class="w-10 h-10 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+				</div>
+				<div>
+					<h3 class="text-sm font-bold text-slate-200">Session Budget Limit</h3>
+					<p class="text-xs text-slate-400">Policy Agent AI Micro-payments</p>
+				</div>
+			</div>
+			<span class="px-3 py-1 rounded-full text-xs font-semibold bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+				%d%% Used
+			</span>
 		</div>
-		<div class="w-full h-3.5 bg-slate-950 rounded-full overflow-hidden p-0.5 border border-slate-800 shadow-inner">
-			<div class="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-400 rounded-full transition-all duration-500 shadow-md shadow-indigo-500/30" style="width: %.1f%%"></div>
+
+		<div class="space-y-2 mb-4">
+			<div class="flex justify-between text-xs font-medium">
+				<span class="text-slate-400">Spent: <strong class="text-slate-200">%d COIN</strong></span>
+				<span class="text-slate-400">Budget: <strong class="text-slate-200">%d COIN</strong></span>
+			</div>
+			<div class="w-full bg-slate-900 rounded-full h-2.5 overflow-hidden p-0.5 border border-slate-800">
+				<div class="bg-gradient-to-r from-indigo-500 via-purple-500 to-amber-500 h-1.5 rounded-full transition-all duration-500" style="width: %d%%"></div>
+			</div>
 		</div>
-		<div class="grid grid-cols-2 gap-3 pt-1 text-xs">
+
+		<div class="grid grid-cols-2 gap-3 pt-3 border-t border-slate-800/60">
 			<div class="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
-				<span class="text-slate-500 block text-[11px]">Remaining Budget</span>
-				<strong class="text-emerald-400 font-outfit text-sm font-bold">%d μc</strong>
+				<span class="text-slate-500 block text-[11px]">Available Budget</span>
+				<strong class="text-emerald-400 font-outfit text-sm font-bold">%d COIN</strong>
 			</div>
 			<div class="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
 				<span class="text-slate-500 block text-[11px]">Passkey Firewall</span>
@@ -467,14 +490,14 @@ func RenderFirewallPartial(w io.Writer, sessionBudget, spent int64) {
 			</div>
 		</div>
 	</div>
-	`, spent, sessionBudget, pct, remaining)
-	fmt.Fprint(w, html)
+	`, pct, spent, sessionBudget, pct, remaining)
+	_, _ = fmt.Fprint(w, html)
 }
 
 // RenderBlocksPartial renders the recent block explorer stream
 func RenderBlocksPartial(w io.Writer, blocks []*indexer.RecentBlock) {
 	if len(blocks) == 0 {
-		fmt.Fprint(w, `<div class="p-6 text-center text-slate-500 text-sm rounded-2xl bg-slate-900/40 border border-slate-800/80">No recent blocks indexed yet.</div>`)
+		_, _ = fmt.Fprint(w, `<div class="p-6 text-center text-slate-500 text-sm rounded-2xl bg-slate-900/40 border border-slate-800/80">No recent blocks indexed yet.</div>`)
 		return
 	}
 
@@ -485,7 +508,7 @@ func RenderBlocksPartial(w io.Writer, blocks []*indexer.RecentBlock) {
 			timeAgo = "Just now"
 		}
 
-		sb.WriteString(fmt.Sprintf(`
+		fmt.Fprintf(&sb, `
 		<div class="p-3.5 rounded-2xl bg-slate-900/60 border border-slate-800/80 hover:border-amber-500/40 transition-all flex items-center justify-between gap-3 text-xs">
 			<div class="flex items-center gap-3">
 				<span class="px-2.5 py-1 rounded-xl bg-amber-500/10 text-amber-300 border border-amber-500/20 font-extrabold font-outfit text-xs">
@@ -501,9 +524,9 @@ func RenderBlocksPartial(w io.Writer, blocks []*indexer.RecentBlock) {
 				<span class="text-[10px] text-emerald-400 font-medium bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 inline-block mt-0.5">CONFIRMED</span>
 			</div>
 		</div>
-		`, b.Height, truncate(b.Hash, 14), b.TxCount, timeAgo))
+		`, b.Height, truncate(b.Hash, 14), b.TxCount, timeAgo)
 	}
-	fmt.Fprint(w, sb.String())
+	_, _ = fmt.Fprint(w, sb.String())
 }
 
 func truncate(s string, l int) string {
