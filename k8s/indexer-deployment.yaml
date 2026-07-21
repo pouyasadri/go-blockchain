@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: indexer-dashboard
+  labels:
+    app: indexer-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: indexer-dashboard
+  template:
+    metadata:
+      labels:
+        app: indexer-dashboard
+    spec:
+      containers:
+        - name: indexer
+          image: ai-go-blockchain:latest
+          imagePullPolicy: IFNotPresent
+          command: ["/usr/local/bin/indexer"]
+          args: ["-node-address", "blockchain-node-0.blockchain-node-service:50051", "-http-port", ":8080"]
+          ports:
+            - containerPort: 8080
+              name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: indexer-dashboard-service
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+  selector:
+    app: indexer-dashboard

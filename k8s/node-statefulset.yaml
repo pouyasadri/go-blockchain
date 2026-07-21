@@ -1,0 +1,58 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: blockchain-node-service
+  labels:
+    app: blockchain-node
+spec:
+  ports:
+    - port: 50051
+      name: grpc
+    - port: 3000
+      name: p2p
+  clusterIP: None
+  selector:
+    app: blockchain-node
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: blockchain-node
+spec:
+  serviceName: "blockchain-node-service"
+  replicas: 3
+  selector:
+    matchLabels:
+      app: blockchain-node
+  template:
+    metadata:
+      labels:
+        app: blockchain-node
+    spec:
+      containers:
+        - name: node
+          image: ai-go-blockchain:latest
+          imagePullPolicy: IFNotPresent
+          env:
+            - name: NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          command: ["/usr/local/bin/node"]
+          args: ["startnode", "--api-addr", ":8080", "--grpc-port", ":50051"]
+          ports:
+            - containerPort: 50051
+              name: grpc
+            - containerPort: 3000
+              name: p2p
+          volumeMounts:
+            - name: node-storage
+              mountPath: /app
+  volumeClaimTemplates:
+    - metadata:
+        name: node-storage
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: 1Gi
