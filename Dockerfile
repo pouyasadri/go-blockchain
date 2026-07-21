@@ -26,8 +26,9 @@ RUN apk add --no-cache ca-certificates tzdata
 
 WORKDIR /app
 
-# Copy compiled binaries from builder stage
+# Copy compiled binaries and assets from builder stage
 COPY --from=builder /app/bin/* /usr/local/bin/
+COPY --from=builder /app/internal/dashboard/assets /app/assets
 
 EXPOSE 5000 50051 8080
 

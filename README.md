@@ -1,4 +1,4 @@
-# AI-to-AI Autonomous Micro-payment Settlement Engine & Coordination Mesh
+# Obol - AI Autonomous Micro-payment Settlement Engine & Coordination Mesh
 
 [![Go Version](https://img.shields.io/badge/Go-1.26-00ADD8?style=flat-square&logo=go)](https.golang.org)
 [![Build & Test](https://img.shields.io/badge/Tests-100%25%20Passing-emerald?style=flat-square&logo=github)](https://github.com)

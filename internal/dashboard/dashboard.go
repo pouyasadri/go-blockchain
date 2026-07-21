@@ -47,6 +47,7 @@ func NewServer(store *indexer.IndexStore, fw *firewall.Firewall, port string) (*
 	mux.HandleFunc("/partials/services", s.handlePartialServices)
 	mux.HandleFunc("/partials/firewall", s.handlePartialFirewall)
 	mux.HandleFunc("/partials/blocks", s.handlePartialBlocks)
+	mux.Handle("/assets/", http.StripPrefix("/assets/", AssetsHandler()))
 
 	s.httpServer = &http.Server{
 		Addr:         port,
