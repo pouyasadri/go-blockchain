@@ -78,38 +78,38 @@ func (kr *Keyring) SignTransaction(tx *core.Transaction, prevTXs map[string]core
 	// For simplicity in the MCP Daemon Phase 2, we assume all inputs are spent by a key we hold,
 	// and we will attempt to find the right wallet.
 	
-	for i, vin := range tx.Vin {
-		prevTx, ok := prevTXs[hex.EncodeToString(vin.Txid)]
-		if !ok {
-			return fmt.Errorf("previous transaction %x not found", vin.Txid)
+	if len(tx.Vin) == 0 {
+		return nil
+	}
+
+	vin := tx.Vin[0]
+	prevTx, ok := prevTXs[hex.EncodeToString(vin.Txid)]
+	if !ok {
+		return fmt.Errorf("previous transaction %x not found", vin.Txid)
+	}
+
+	prevOut := prevTx.Vout[vin.Vout]
+	pubKeyHash := prevOut.PubKeyHash
+	if vin.IsRefund && prevOut.ScriptType == core.ScriptTypeEscrow {
+		pubKeyHash = prevOut.BuyerPubKeyHash
+	}
+
+	// Find matching wallet
+	var matchedWallet *core.Wallet
+	for _, w := range kr.keys {
+		if string(core.HashPubKey(w.PublicKey)) == string(pubKeyHash) {
+			matchedWallet = w
+			break
 		}
-		
-		prevOut := prevTx.Vout[vin.Vout]
-		pubKeyHash := prevOut.PubKeyHash
-		if vin.IsRefund && prevOut.ScriptType == core.ScriptTypeEscrow {
-			pubKeyHash = prevOut.BuyerPubKeyHash
-		}
-		
-		// Find matching wallet
-		var matchedWallet *core.Wallet
-		for _, w := range kr.keys {
-			if string(core.HashPubKey(w.PublicKey)) == string(pubKeyHash) {
-				matchedWallet = w
-				break
-			}
-		}
-		
-		if matchedWallet == nil {
-			return fmt.Errorf("no key found in keyring to spend input %d", i)
-		}
-		
-		err := tx.Sign(matchedWallet.PrivateKey, prevTXs)
-		if err != nil {
-			return fmt.Errorf("failed to sign input %d: %w", i, err)
-		}
-		// Since tx.Sign signs ALL inputs using the SAME private key (a limitation of the current core.Transaction.Sign),
-		// we break early. The core node assumes a single signer for the whole transaction.
-		break
+	}
+
+	if matchedWallet == nil {
+		return fmt.Errorf("no key found in keyring to spend input 0")
+	}
+
+	err := tx.Sign(matchedWallet.PrivateKey, prevTXs)
+	if err != nil {
+		return fmt.Errorf("failed to sign input 0: %w", err)
 	}
 
 	return nil

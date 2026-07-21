@@ -74,7 +74,7 @@ func (b *SSEBroker) listen() {
 func (b *SSEBroker) BroadcastEvent(event string, htmlData string) {
 	lines := strings.Split(htmlData, "\n")
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("event: %s\n", event))
+	fmt.Fprintf(&sb, "event: %s\n", event)
 	for _, line := range lines {
 		sb.WriteString("data: ")
 		sb.WriteString(line)
@@ -114,7 +114,7 @@ func (b *SSEBroker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Send initial connection heartbeat
-	fmt.Fprintf(w, "event: connected\ndata: {\"status\": \"ok\"}\n\n")
+	_, _ = fmt.Fprintf(w, "event: connected\ndata: {\"status\": \"ok\"}\n\n")
 	flusher.Flush()
 
 	ticker := time.NewTicker(15 * time.Second)

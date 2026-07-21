@@ -109,7 +109,12 @@ func bytesToCommand(b []byte) string {
 }
 
 func (s *Server) requestBlocks() {
-	for _, node := range s.knownNodes {
+	s.mu.RLock()
+	nodes := make([]string, len(s.knownNodes))
+	copy(nodes, s.knownNodes)
+	s.mu.RUnlock()
+
+	for _, node := range nodes {
 		s.sendGetBlocks(node)
 	}
 }
@@ -594,8 +599,15 @@ func (s *Server) Start(ctx context.Context) {
 		}
 	}()
 
+	s.mu.RLock()
+	var firstNode string
 	if len(s.knownNodes) > 0 && s.nodeAddress != s.knownNodes[0] {
-		s.sendVersion(s.knownNodes[0])
+		firstNode = s.knownNodes[0]
+	}
+	s.mu.RUnlock()
+
+	if firstNode != "" {
+		s.sendVersion(firstNode)
 	}
 
 	s.logger.Info("server started", "address", s.nodeAddress)

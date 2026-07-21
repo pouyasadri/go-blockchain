@@ -66,9 +66,9 @@ func TestLoadAndVerify(t *testing.T) {
 	// Tamper file on disk
 	p.SessionBudget = 200
 	data, _ = json.Marshal(p) // New hash, old signature
-	os.WriteFile(path, data, 0644)
+	_ = os.WriteFile(path, data, 0644)
 
 	assert.Panics(t, func() {
-		LoadAndVerify(path)
+		_, _ = LoadAndVerify(path)
 	})
 }

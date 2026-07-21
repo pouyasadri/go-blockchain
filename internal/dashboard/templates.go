@@ -334,28 +334,29 @@ func RenderMetricsPartial(w io.Writer, m indexer.Metrics) {
 		</div>
 	</div>
 	`, m.TotalBlocksIndexed, m.TotalTxCount, m.TotalEscrowsCount, m.TotalVolume)
-	fmt.Fprint(w, html)
+	_, _ = fmt.Fprint(w, html)
 }
 
 // RenderEscrowsPartial renders active escrows list
 func RenderEscrowsPartial(w io.Writer, escrows []*indexer.IndexedEscrow) {
 	if len(escrows) == 0 {
-		fmt.Fprint(w, `<div class="p-8 text-center text-slate-500 text-sm rounded-2xl bg-slate-900/40 border border-slate-800/80">No active HTLC or ZKCP escrows currently pending settlement.</div>`)
+		_, _ = fmt.Fprint(w, `<div class="p-8 text-center text-slate-500 text-sm rounded-2xl bg-slate-900/40 border border-slate-800/80">No active HTLC or ZKCP escrows currently pending settlement.</div>`)
 		return
 	}
 
 	var sb strings.Builder
 	for _, e := range escrows {
 		statusBadge := "bg-amber-500/10 text-amber-300 border-amber-500/30"
-		if e.Status == indexer.EscrowStatusClaimed {
+		switch e.Status {
+		case indexer.EscrowStatusClaimed:
 			statusBadge = "bg-emerald-500/10 text-emerald-300 border-emerald-500/30"
-		} else if e.Status == indexer.EscrowStatusRefunded {
+		case indexer.EscrowStatusRefunded:
 			statusBadge = "bg-rose-500/10 text-rose-300 border-rose-500/30"
-		} else if e.Status == indexer.EscrowStatusExpired {
+		case indexer.EscrowStatusExpired:
 			statusBadge = "bg-slate-500/10 text-slate-300 border-slate-500/30"
 		}
 
-		sb.WriteString(fmt.Sprintf(`
+		fmt.Fprintf(&sb, `
 		<div class="p-4 rounded-2xl bg-slate-900/60 border border-slate-800/80 hover:border-indigo-500/40 transition-all space-y-3">
 			<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
 				<div class="flex items-center gap-2 flex-wrap">
@@ -390,21 +391,21 @@ func RenderEscrowsPartial(w io.Writer, escrows []*indexer.IndexedEscrow) {
 				<span class="font-mono text-slate-500">Created @ Height #%d</span>
 			</div>
 		</div>
-		`, e.TxID, truncate(e.TxID, 12), statusBadge, e.Status, e.Amount, e.BuyerPubKeyHash, truncate(e.BuyerPubKeyHash, 10), e.SellerPubKeyHash, truncate(e.SellerPubKeyHash, 10), e.TimeoutBlock, e.CreatedAtHeight))
+		`, e.TxID, truncate(e.TxID, 12), statusBadge, e.Status, e.Amount, e.BuyerPubKeyHash, truncate(e.BuyerPubKeyHash, 10), e.SellerPubKeyHash, truncate(e.SellerPubKeyHash, 10), e.TimeoutBlock, e.CreatedAtHeight)
 	}
-	fmt.Fprint(w, sb.String())
+	_, _ = fmt.Fprint(w, sb.String())
 }
 
 // RenderServicesPartial renders marketplace items
 func RenderServicesPartial(w io.Writer, services []*indexer.AgentService) {
 	if len(services) == 0 {
-		fmt.Fprint(w, `<div class="p-8 text-center text-slate-500 text-sm col-span-2 rounded-2xl bg-slate-900/40 border border-slate-800/80">No AI agent services registered yet. Register services via CLI or API.</div>`)
+		_, _ = fmt.Fprint(w, `<div class="p-8 text-center text-slate-500 text-sm col-span-2 rounded-2xl bg-slate-900/40 border border-slate-800/80">No AI agent services registered yet. Register services via CLI or API.</div>`)
 		return
 	}
 
 	var sb strings.Builder
 	for _, s := range services {
-		sb.WriteString(fmt.Sprintf(`
+		fmt.Fprintf(&sb, `
 		<div class="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 hover:border-emerald-500/40 transition-all flex flex-col justify-between space-y-4">
 			<div class="space-y-2">
 				<div class="flex items-start justify-between gap-3">
@@ -427,9 +428,9 @@ func RenderServicesPartial(w io.Writer, services []*indexer.AgentService) {
 				</div>
 			</div>
 		</div>
-		`, s.Name, s.PricePerCall, s.Description, s.AgentAddress, truncate(s.AgentAddress, 14), s.EndpointURL))
+		`, s.Name, s.PricePerCall, s.Description, s.AgentAddress, truncate(s.AgentAddress, 14), s.EndpointURL)
 	}
-	fmt.Fprint(w, sb.String())
+	_, _ = fmt.Fprint(w, sb.String())
 }
 
 // RenderFirewallPartial renders firewall budget usage

@@ -76,7 +76,7 @@ func TestGRPCServer(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// 3. Establish gRPC client connection
-	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	assert.NoError(t, err)
 	defer func() {
 		_ = conn.Close()

@@ -60,7 +60,7 @@ func NewMCPDaemon(fw *firewall.Firewall, in io.Reader, out io.Writer, errOut io.
 // Close gracefully closes connections
 func (d *MCPDaemon) Close() {
 	if d.grpcConn != nil {
-		d.grpcConn.Close()
+		_ = d.grpcConn.Close()
 	}
 }
 

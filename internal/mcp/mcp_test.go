@@ -35,7 +35,7 @@ func TestMCPInitialize(t *testing.T) {
 
 	done := make(chan bool)
 	go func() {
-		daemon.Run(ctx)
+		_ = daemon.Run(ctx)
 		done <- true
 	}()
 

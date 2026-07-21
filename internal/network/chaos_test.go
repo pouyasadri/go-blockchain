@@ -27,7 +27,7 @@ func TestTLSConfigManagerAndmTLSHandshake(t *testing.T) {
 		t.Skipf("skipping test due to network bind restriction: %v", err)
 		return
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	addr := listener.Addr().String()
 
@@ -38,7 +38,7 @@ func TestTLSConfigManagerAndmTLSHandshake(t *testing.T) {
 			serverErrCh <- err
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		buf := make([]byte, 10)
 		_, err = conn.Read(buf)
 		serverErrCh <- err
@@ -100,7 +100,7 @@ func TestUnauthenticatedTLSClientRejected(t *testing.T) {
 		t.Skipf("skipping test due to network bind restriction: %v", err)
 		return
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	addr := listener.Addr().String()
 

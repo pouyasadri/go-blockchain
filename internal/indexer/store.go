@@ -82,14 +82,14 @@ func NewIndexStore() *IndexStore {
 }
 
 func escrowKey(txID string, vout int) string {
-	return hex.EncodeToString([]byte(txID)) + ":" + string(rune(vout))
+	return txID + ":" + hex.EncodeToString([]byte{byte(vout)})
 }
 
 // SaveEscrow adds or updates an escrow entry
 func (s *IndexStore) SaveEscrow(escrow *IndexedEscrow) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	key := escrow.TxID + ":" + string(rune(escrow.Vout))
+	key := escrowKey(escrow.TxID, escrow.Vout)
 	if _, exists := s.escrows[key]; !exists {
 		s.metrics.TotalEscrowsCount++
 	}
@@ -100,7 +100,7 @@ func (s *IndexStore) SaveEscrow(escrow *IndexedEscrow) {
 func (s *IndexStore) GetEscrow(txID string, vout int) (*IndexedEscrow, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	key := txID + ":" + string(rune(vout))
+	key := escrowKey(txID, vout)
 	e, ok := s.escrows[key]
 	return e, ok
 }
