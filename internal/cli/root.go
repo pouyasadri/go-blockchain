@@ -129,7 +129,7 @@ func Execute(args []string, out io.Writer) error {
 				return fmt.Errorf("failed to find utxos: %w", err)
 			}
 
-			balance := 0
+			var balance int64 = 0
 			for _, out := range UTXOs {
 				balance += out.Value
 			}
@@ -224,7 +224,8 @@ func Execute(args []string, out io.Writer) error {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			from, _ := cmd.Flags().GetString("from")
 			to, _ := cmd.Flags().GetString("to")
-			amount, _ := cmd.Flags().GetInt("amount")
+			amountVal, _ := cmd.Flags().GetInt("amount")
+			amount := int64(amountVal)
 			mineNow, _ := cmd.Flags().GetBool("mine")
 
 			if from == "" || to == "" || amount <= 0 {
@@ -305,6 +306,7 @@ func Execute(args []string, out io.Writer) error {
 
 			miner, _ := cmd.Flags().GetString("miner")
 			apiAddr, _ := cmd.Flags().GetString("api-addr")
+			grpcPort, _ := cmd.Flags().GetString("grpc-port")
 
 			if miner != "" && !core.ValidateAddress(miner) {
 				return fmt.Errorf("ERROR: Miner address is not valid")
@@ -334,12 +336,23 @@ func Execute(args []string, out io.Writer) error {
 				}
 			}()
 
+			if grpcPort != "" {
+				grpcSrv := network.NewGRPCServer(server, nil)
+				go func() {
+					logger.Info("starting gRPC server", "port", grpcPort)
+					if err := grpcSrv.Start(grpcPort); err != nil {
+						logger.Error("gRPC server error", "error", err)
+					}
+				}()
+			}
+
 			server.Start(ctx)
 			return nil
 		},
 	}
 	startNodeCmd.Flags().String("miner", "", "Enable mining mode and send reward to ADDRESS")
 	startNodeCmd.Flags().String("api-addr", ":8080", "Address to run the HTTP API server on")
+	startNodeCmd.Flags().String("grpc-port", "", "Port to run gRPC server on (e.g. :50051)")
 
 	rootCmd.AddCommand(createBlockchainCmd, createWalletCmd, getBalanceCmd, listAddressesCmd, printChainCmd, reindexUTXOCmd, sendCmd, startNodeCmd)
 

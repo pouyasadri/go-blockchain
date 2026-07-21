@@ -15,9 +15,9 @@ import (
 	"fmt"
 )
 
-const subsidy = 10
+const subsidy = int64(10)
 
-// Transaction represents a Bitcoin transaction
+// Transaction represents a transaction
 type Transaction struct {
 	ID   []byte
 	Vin  []TXInput
@@ -71,11 +71,16 @@ func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTXs map[string]Transac
 
 	for inID, vin := range txCopy.Vin {
 		prevTx := prevTXs[hex.EncodeToString(vin.Txid)]
+		prevOut := prevTx.Vout[vin.Vout]
 		txCopy.Vin[inID].Signature = nil
-		txCopy.Vin[inID].PubKey = prevTx.Vout[vin.Vout].PubKeyHash
 
-		// Use the canonical hash of the trimmed copy as the message to sign,
-		// not fmt.Sprintf which is not guaranteed to be stable across Go versions.
+		expectedPubKeyHash := prevOut.PubKeyHash
+		if tx.Vin[inID].IsRefund && prevOut.ScriptType == ScriptTypeEscrow {
+			expectedPubKeyHash = prevOut.BuyerPubKeyHash
+		}
+		txCopy.Vin[inID].PubKey = expectedPubKeyHash
+
+		// Use the canonical hash of the trimmed copy as the message to sign
 		dataToSign := txCopy.Hash()
 
 		r, s, err := ecdsa.Sign(rand.Reader, &privKey, dataToSign)
@@ -83,7 +88,6 @@ func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTXs map[string]Transac
 			return fmt.Errorf("failed to sign transaction: %w", err)
 		}
 		// Zero-pad r and s to exactly 32 bytes each (P-256 curve).
-		// big.Int.Bytes() drops leading zeros which breaks the fixed-split decode.
 		rBytes := make([]byte, 32)
 		sBytes := make([]byte, 32)
 		r.FillBytes(rBytes)
@@ -107,12 +111,19 @@ func (tx Transaction) String() string {
 		lines = append(lines, fmt.Sprintf("       Out:       %d", input.Vout))
 		lines = append(lines, fmt.Sprintf("       Signature: %x", input.Signature))
 		lines = append(lines, fmt.Sprintf("       PubKey:    %x", input.PubKey))
+		if len(input.EscrowWitness) > 0 {
+			lines = append(lines, fmt.Sprintf("       Witness:   %x", input.EscrowWitness))
+		}
+		if input.IsRefund {
+			lines = append(lines, "       IsRefund:  true")
+		}
 	}
 
 	for i, output := range tx.Vout {
 		lines = append(lines, fmt.Sprintf("     Output %d:", i))
 		lines = append(lines, fmt.Sprintf("       Value:  %d", output.Value))
 		lines = append(lines, fmt.Sprintf("       Script: %x", output.PubKeyHash))
+		lines = append(lines, fmt.Sprintf("       Type:   %d", output.ScriptType))
 	}
 
 	return strings.Join(lines, "\n")
@@ -124,11 +135,18 @@ func (tx *Transaction) TrimmedCopy() Transaction {
 	var outputs []TXOutput
 
 	for _, vin := range tx.Vin {
-		inputs = append(inputs, TXInput{vin.Txid, vin.Vout, nil, nil})
+		inputs = append(inputs, TXInput{vin.Txid, vin.Vout, nil, nil, nil, vin.IsRefund})
 	}
 
 	for _, vout := range tx.Vout {
-		outputs = append(outputs, TXOutput{vout.Value, vout.PubKeyHash})
+		outputs = append(outputs, TXOutput{
+			Value:           vout.Value,
+			PubKeyHash:      vout.PubKeyHash,
+			ScriptType:      vout.ScriptType,
+			DataHashLock:    vout.DataHashLock,
+			TimeoutBlock:    vout.TimeoutBlock,
+			BuyerPubKeyHash: vout.BuyerPubKeyHash,
+		})
 	}
 
 	txCopy := Transaction{tx.ID, inputs, outputs}
@@ -136,8 +154,8 @@ func (tx *Transaction) TrimmedCopy() Transaction {
 	return txCopy
 }
 
-// Verify verifies signatures of Transaction inputs
-func (tx *Transaction) Verify(prevTXs map[string]Transaction) bool {
+// Verify verifies signatures and escrow conditions of Transaction inputs
+func (tx *Transaction) Verify(prevTXs map[string]Transaction, currentBlockHeight int64) bool {
 	if tx.IsCoinbase() {
 		return true
 	}
@@ -151,10 +169,26 @@ func (tx *Transaction) Verify(prevTXs map[string]Transaction) bool {
 	txCopy := tx.TrimmedCopy()
 	curve := elliptic.P256()
 
+	var inputSum int64
+	var outputSum int64
+
+	for _, out := range tx.Vout {
+		if out.Value <= 0 {
+			return false // Outputs must be strictly positive
+		}
+		outputSum += out.Value
+	}
+
 	for inID, vin := range tx.Vin {
 		prevTx := prevTXs[hex.EncodeToString(vin.Txid)]
+		prevOut := prevTx.Vout[vin.Vout]
 		txCopy.Vin[inID].Signature = nil
-		txCopy.Vin[inID].PubKey = prevTx.Vout[vin.Vout].PubKeyHash
+
+		expectedPubKeyHash := prevOut.PubKeyHash
+		if vin.IsRefund && prevOut.ScriptType == ScriptTypeEscrow {
+			expectedPubKeyHash = prevOut.BuyerPubKeyHash
+		}
+		txCopy.Vin[inID].PubKey = expectedPubKeyHash
 
 		// Signatures are stored as 32-byte zero-padded r || s (P-256 curve).
 		if len(vin.Signature) != 64 {
@@ -177,7 +211,31 @@ func (tx *Transaction) Verify(prevTXs map[string]Transaction) bool {
 		if !ecdsa.Verify(&rawPubKey, dataToVerify, r, s) {
 			return false
 		}
+
+		// Verify additional script constraints for escrow and ZKCP outputs
+		if prevOut.ScriptType == ScriptTypeEscrow || prevOut.ScriptType == ScriptTypeZKCP {
+			claimerPubKeyHash := HashPubKey(vin.PubKey)
+			if vin.IsRefund {
+				if !prevOut.CanRefundEscrow(currentBlockHeight, claimerPubKeyHash) {
+					return false
+				}
+			} else if prevOut.ScriptType == ScriptTypeEscrow {
+				if !prevOut.CanClaimEscrow(vin.EscrowWitness, claimerPubKeyHash) {
+					return false
+				}
+			} else if prevOut.ScriptType == ScriptTypeZKCP {
+				if !prevOut.CanClaimZKCP(vin.EscrowWitness, claimerPubKeyHash) {
+					return false
+				}
+			}
+		}
+
 		txCopy.Vin[inID].PubKey = nil
+		inputSum += prevOut.Value
+	}
+
+	if inputSum < outputSum {
+		return false // Inflation detected
 	}
 
 	return true
@@ -195,7 +253,7 @@ func NewCoinbaseTX(to, data string) (*Transaction, error) {
 		data = fmt.Sprintf("%x", randData)
 	}
 
-	txin := TXInput{[]byte{}, -1, nil, []byte(data)}
+	txin := TXInput{[]byte{}, -1, nil, []byte(data), nil, false}
 	txout := NewTXOutput(subsidy, to)
 	tx := Transaction{nil, []TXInput{txin}, []TXOutput{*txout}}
 	tx.ID = tx.Hash()
@@ -204,7 +262,7 @@ func NewCoinbaseTX(to, data string) (*Transaction, error) {
 }
 
 // NewUTXOTransaction creates a new transaction
-func NewUTXOTransaction(wallet *Wallet, to string, amount int, UTXOSet *UTXOSet) (*Transaction, error) {
+func NewUTXOTransaction(wallet *Wallet, to string, amount int64, UTXOSet *UTXOSet) (*Transaction, error) {
 	var inputs []TXInput
 	var outputs []TXOutput
 
@@ -227,10 +285,12 @@ func NewUTXOTransaction(wallet *Wallet, to string, amount int, UTXOSet *UTXOSet)
 
 		for _, out := range outs {
 			input := TXInput{
-				Txid:      txID,
-				Vout:      out,
-				Signature: nil,
-				PubKey:    wallet.PublicKey,
+				Txid:          txID,
+				Vout:          out,
+				Signature:     nil,
+				PubKey:        wallet.PublicKey,
+				EscrowWitness: nil,
+				IsRefund:      false,
 			}
 			inputs = append(inputs, input)
 		}
@@ -252,6 +312,152 @@ func NewUTXOTransaction(wallet *Wallet, to string, amount int, UTXOSet *UTXOSet)
 	err = UTXOSet.Blockchain.SignTransaction(&tx, wallet.PrivateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign transaction: %w", err)
+	}
+
+	return &tx, nil
+}
+
+// NewEscrowTransaction creates a new escrow transaction
+func NewEscrowTransaction(buyerWallet *Wallet, sellerAddr string, amount int64, dataHash []byte, timeoutBlock int64, utxoSet *UTXOSet) (*Transaction, error) {
+	var inputs []TXInput
+	var outputs []TXOutput
+
+	pubKeyHash := HashPubKey(buyerWallet.PublicKey)
+	acc, validOutputs, err := utxoSet.FindSpendableOutputs(pubKeyHash, amount)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find spendable outputs: %w", err)
+	}
+
+	if acc < amount {
+		return nil, errors.New("not enough funds")
+	}
+
+	// Build a list of inputs
+	for txid, outs := range validOutputs {
+		txID, err := hex.DecodeString(txid)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode tx string: %w", err)
+		}
+
+		for _, out := range outs {
+			input := TXInput{
+				Txid:          txID,
+				Vout:          out,
+				Signature:     nil,
+				PubKey:        buyerWallet.PublicKey,
+				EscrowWitness: nil,
+				IsRefund:      false,
+			}
+			inputs = append(inputs, input)
+		}
+	}
+
+	// Build the escrow output
+	buyerAddr := string(buyerWallet.GetAddress())
+	escrowOut := NewEscrowOutput(amount, sellerAddr, buyerAddr, dataHash, timeoutBlock)
+	outputs = append(outputs, *escrowOut)
+
+	// Add a change output if we accumulated more than amount
+	if acc > amount {
+		outputs = append(outputs, *NewTXOutput(acc-amount, buyerAddr))
+	}
+
+	tx := Transaction{
+		ID:   nil,
+		Vin:  inputs,
+		Vout: outputs,
+	}
+	tx.ID = tx.Hash()
+
+	err = utxoSet.Blockchain.SignTransaction(&tx, buyerWallet.PrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign transaction: %w", err)
+	}
+
+	return &tx, nil
+}
+
+// NewEscrowClaimTransaction creates a transaction that spends an escrow output by providing the matching data
+func NewEscrowClaimTransaction(sellerWallet *Wallet, escrowTxID []byte, escrowOutIdx int, deliveredData []byte, blockchain *Blockchain) (*Transaction, error) {
+	// Retrieve the escrow transaction
+	escrowTx, err := blockchain.FindTransaction(escrowTxID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find escrow transaction: %w", err)
+	}
+
+	if escrowOutIdx < 0 || escrowOutIdx >= len(escrowTx.Vout) {
+		return nil, errors.New("invalid escrow output index")
+	}
+	escrowOut := escrowTx.Vout[escrowOutIdx]
+
+	// Build the input spending the escrow output
+	input := TXInput{
+		Txid:          escrowTxID,
+		Vout:          escrowOutIdx,
+		Signature:     nil,
+		PubKey:        sellerWallet.PublicKey,
+		EscrowWitness: deliveredData,
+		IsRefund:      false,
+	}
+
+	// Build the output sending the funds to the seller's address
+	sellerAddr := string(sellerWallet.GetAddress())
+	output := NewTXOutput(escrowOut.Value, sellerAddr)
+
+	tx := Transaction{
+		ID:   nil,
+		Vin:  []TXInput{input},
+		Vout: []TXOutput{*output},
+	}
+	tx.ID = tx.Hash()
+
+	// Sign the transaction
+	err = blockchain.SignTransaction(&tx, sellerWallet.PrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign claim transaction: %w", err)
+	}
+
+	return &tx, nil
+}
+
+// NewEscrowRefundTransaction creates a timeout refund transaction
+func NewEscrowRefundTransaction(buyerWallet *Wallet, escrowTxID []byte, escrowOutIdx int, blockchain *Blockchain) (*Transaction, error) {
+	// Retrieve the escrow transaction
+	escrowTx, err := blockchain.FindTransaction(escrowTxID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find escrow transaction: %w", err)
+	}
+
+	if escrowOutIdx < 0 || escrowOutIdx >= len(escrowTx.Vout) {
+		return nil, errors.New("invalid escrow output index")
+	}
+	escrowOut := escrowTx.Vout[escrowOutIdx]
+
+	// Build the input spending the escrow output with refund path
+	input := TXInput{
+		Txid:          escrowTxID,
+		Vout:          escrowOutIdx,
+		Signature:     nil,
+		PubKey:        buyerWallet.PublicKey,
+		EscrowWitness: nil,
+		IsRefund:      true,
+	}
+
+	// Build the output sending the refund to the buyer
+	buyerAddr := string(buyerWallet.GetAddress())
+	output := NewTXOutput(escrowOut.Value, buyerAddr)
+
+	tx := Transaction{
+		ID:   nil,
+		Vin:  []TXInput{input},
+		Vout: []TXOutput{*output},
+	}
+	tx.ID = tx.Hash()
+
+	// Sign the transaction
+	err = blockchain.SignTransaction(&tx, buyerWallet.PrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign refund transaction: %w", err)
 	}
 
 	return &tx, nil

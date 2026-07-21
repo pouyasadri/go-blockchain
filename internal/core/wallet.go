@@ -13,7 +13,8 @@ import (
 )
 
 const version = byte(0x00)
-const addressChecksumLen = 4
+const AddressChecksumLen = 4
+const addressChecksumLen = AddressChecksumLen
 
 // Wallet stores private and public keys
 type Wallet struct {

@@ -13,9 +13,9 @@ type UTXOSet struct {
 }
 
 // FindSpendableOutputs finds and returns unspent outputs to reference in inputs
-func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount int) (int, map[string][]int, error) {
+func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount int64) (int64, map[string][]int, error) {
 	unspentOutputs := make(map[string][]int)
-	accumulated := 0
+	var accumulated int64 = 0
 	db := u.Blockchain.DB()
 
 	err := db.IterateUTXO(func(k, v []byte) bool {
@@ -23,7 +23,7 @@ func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount int) (int, map[s
 		outs := DeserializeOutputs(v)
 
 		for outIdx, out := range outs.Outputs {
-			if out.IsLockedWithKey(pubkeyHash) && accumulated < amount {
+			if out.ScriptType != ScriptTypeEscrow && out.IsLockedWithKey(pubkeyHash) && accumulated < amount {
 				accumulated += out.Value
 				unspentOutputs[txID] = append(unspentOutputs[txID], outIdx)
 			}
@@ -62,6 +62,39 @@ func (u UTXOSet) FindUTXO(pubKeyHash []byte) ([]TXOutput, error) {
 	}
 
 	return UTXOs, nil
+}
+
+// UTXOItem holds UTXO output details along with TxID and index
+type UTXOItem struct {
+	TxID   []byte
+	Vout   int
+	Output TXOutput
+}
+
+// FindUTXOItems returns all UTXO items locked by or associated with a pubKeyHash
+func (u UTXOSet) FindUTXOItems(pubKeyHash []byte) ([]UTXOItem, error) {
+	var items []UTXOItem
+	db := u.Blockchain.DB()
+
+	err := db.IterateUTXO(func(k, v []byte) bool {
+		outs := DeserializeOutputs(v)
+		for outIdx, out := range outs.Outputs {
+			if out.IsLockedWithKey(pubKeyHash) || (out.ScriptType == ScriptTypeEscrow && out.IsBuyer(pubKeyHash)) {
+				items = append(items, UTXOItem{
+					TxID:   k,
+					Vout:   outIdx,
+					Output: out,
+				})
+			}
+		}
+		return true
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to iterate utxos: %w", err)
+	}
+
+	return items, nil
 }
 
 // CountTransactions returns the number of transactions in the UTXO set

@@ -69,9 +69,16 @@ func (bc *Blockchain) AddBlock(block *Block) error {
 		return nil
 	}
 
-	pow := NewProofOfWork(block)
-	if !pow.Validate() {
-		return errors.New("invalid block: proof-of-work failed")
+	// If block has authority signature, verify PoA; otherwise verify PoW.
+	if len(block.AuthoritySignature) > 0 {
+		if !VerifyPoABlock(block) {
+			return errors.New("invalid block: proof-of-authority signature verification failed")
+		}
+	} else {
+		pow := NewProofOfWork(block)
+		if !pow.Validate() {
+			return errors.New("invalid block: proof-of-work failed")
+		}
 	}
 
 	blockData := block.Serialize()
@@ -310,5 +317,11 @@ func (bc *Blockchain) VerifyTransaction(tx *Transaction) (bool, error) {
 		prevTXs[hex.EncodeToString(prevTX.ID)] = prevTX
 	}
 
-	return tx.Verify(prevTXs), nil
+	bestHeight, err := bc.GetBestHeight()
+	if err != nil {
+		return false, fmt.Errorf("failed to get blockchain height: %w", err)
+	}
+	currentHeight := int64(bestHeight)
+
+	return tx.Verify(prevTXs, currentHeight), nil
 }

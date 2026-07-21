@@ -11,13 +11,15 @@ import (
 
 // Block represents a block in the blockchain
 type Block struct {
-	Timestamp     int64
-	Transactions  []*Transaction
-	PrevBlockHash []byte
-	Hash          []byte
-	Nonce         int
-	Height        int
-	Bits          int
+	Timestamp          int64
+	Transactions       []*Transaction
+	PrevBlockHash      []byte
+	Hash               []byte
+	Nonce              int
+	Height             int
+	Bits               int
+	AuthoritySignature []byte // PoA signature (empty for PoW blocks)
+	AuthorityPubKey    []byte // Signing authority's public key
 }
 
 // NewBlock creates and returns Block

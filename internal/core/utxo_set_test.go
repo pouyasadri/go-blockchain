@@ -77,5 +77,5 @@ func TestUTXOSet(t *testing.T) {
 	assert.NoError(t, err)
 	updatedOuts := DeserializeOutputs(updatedBytes)
 	assert.Len(t, updatedOuts.Outputs, 1)
-	assert.Equal(t, 5, updatedOuts.Outputs[0].Value)
+	assert.Equal(t, int64(5), updatedOuts.Outputs[0].Value)
 }

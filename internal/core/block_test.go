@@ -11,7 +11,7 @@ func TestBlock(t *testing.T) {
 	wallet, _ := NewWallet()
 	addr := string(wallet.GetAddress())
 
-	txin := TXInput{[]byte{}, -1, nil, wallet.PublicKey}
+	txin := TXInput{[]byte{}, -1, nil, wallet.PublicKey, nil, false}
 	txout := NewTXOutput(10, addr)
 	tx := &Transaction{nil, []TXInput{txin}, []TXOutput{*txout}}
 	tx.ID = tx.Hash()

@@ -60,16 +60,17 @@ type verzion struct {
 
 // Server represents a P2P node in the network
 type Server struct {
-	mu              sync.RWMutex
-	ctx             context.Context
-	miningCancel    context.CancelFunc
-	nodeAddress     string
-	miningAddress   string
-	knownNodes      []string
-	blocksInTransit [][]byte
-	mempool         map[string]core.Transaction
-	bc              *core.Blockchain
-	logger          *slog.Logger
+	mu               sync.RWMutex
+	ctx              context.Context
+	miningCancel     context.CancelFunc
+	nodeAddress      string
+	miningAddress    string
+	knownNodes       []string
+	blocksInTransit  [][]byte
+	mempool          map[string]core.Transaction
+	bc               *core.Blockchain
+	logger           *slog.Logger
+	blockSubscribers []chan *core.Block
 }
 
 // NewServer initializes a new Server
@@ -79,12 +80,13 @@ func NewServer(nodeID, minerAddress string, bc *core.Blockchain, logger *slog.Lo
 	}
 
 	return &Server{
-		nodeAddress:   fmt.Sprintf("localhost:%s", nodeID),
-		miningAddress: minerAddress,
-		knownNodes:    []string{"localhost:3000"},
-		mempool:       make(map[string]core.Transaction),
-		bc:            bc,
-		logger:        logger,
+		nodeAddress:      fmt.Sprintf("localhost:%s", nodeID),
+		miningAddress:    minerAddress,
+		knownNodes:       []string{"localhost:3000"},
+		mempool:          make(map[string]core.Transaction),
+		bc:               bc,
+		logger:           logger,
+		blockSubscribers: make([]chan *core.Block, 0),
 	}
 }
 
@@ -243,6 +245,7 @@ func (s *Server) handleBlock(request []byte) {
 		s.logger.Error("failed to add block", "error", err)
 		return
 	}
+	s.notifyBlock(b)
 	metrics.BlockchainHeight.Set(float64(b.Height))
 
 	s.mu.Lock()
@@ -479,6 +482,7 @@ func (s *Server) handleTx(request []byte) {
 		}
 
 		s.logger.Info("new block is mined!", "hash", fmt.Sprintf("%x", newBlock.Hash))
+		s.notifyBlock(newBlock)
 
 		s.mu.Lock()
 		for _, t := range txs {
@@ -698,4 +702,75 @@ func (s *Server) GetKnownNodes() []string {
 	nodes := make([]string, len(s.knownNodes))
 	copy(nodes, s.knownNodes)
 	return nodes
+}
+
+// SubscribeBlocks adds a subscription channel for new blocks
+func (s *Server) SubscribeBlocks() chan *core.Block {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ch := make(chan *core.Block, 10)
+	s.blockSubscribers = append(s.blockSubscribers, ch)
+	return ch
+}
+
+// UnsubscribeBlocks removes a subscription channel
+func (s *Server) UnsubscribeBlocks(ch chan *core.Block) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, sub := range s.blockSubscribers {
+		if sub == ch {
+			s.blockSubscribers = append(s.blockSubscribers[:i], s.blockSubscribers[i+1:]...)
+			close(ch)
+			break
+		}
+	}
+}
+
+func (s *Server) notifyBlock(b *core.Block) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, sub := range s.blockSubscribers {
+		select {
+		case sub <- b:
+		default:
+			// Buffer full, skip or handle slow receiver
+		}
+	}
+}
+
+// SubmitTransaction submits a verified transaction to the mempool and broadcasts it
+func (s *Server) SubmitTransaction(tx *core.Transaction) error {
+	s.mu.Lock()
+	txID := hex.EncodeToString(tx.ID)
+	if _, exists := s.mempool[txID]; exists {
+		s.mu.Unlock()
+		return fmt.Errorf("transaction %s already in mempool", txID)
+	}
+	s.mu.Unlock() // Release lock for I/O bound verification
+
+	valid, err := s.bc.VerifyTransaction(tx)
+	if err != nil {
+		return fmt.Errorf("transaction verification failed: %w", err)
+	}
+	if !valid {
+		return fmt.Errorf("transaction is invalid")
+	}
+
+	// Re-acquire lock to insert
+	s.mu.Lock()
+	if _, exists := s.mempool[txID]; exists {
+		s.mu.Unlock()
+		return fmt.Errorf("transaction %s already in mempool (added concurrently)", txID)
+	}
+	s.mempool[txID] = *tx
+	mempoolLen := len(s.mempool)
+	s.mu.Unlock()
+
+	metrics.MempoolSize.Set(float64(mempoolLen))
+	metrics.TransactionsReceived.Inc()
+
+	// Broadcast the transaction to other known nodes
+	s.SendTxToKnownNodes(tx)
+
+	return nil
 }

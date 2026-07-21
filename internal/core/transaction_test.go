@@ -10,7 +10,7 @@ func TestTransaction(t *testing.T) {
 	wallet, _ := NewWallet()
 	addr := string(wallet.GetAddress())
 
-	txin := TXInput{[]byte{}, -1, nil, wallet.PublicKey}
+	txin := TXInput{[]byte{}, -1, nil, wallet.PublicKey, nil, false}
 	txout := NewTXOutput(10, addr)
 	tx := &Transaction{nil, []TXInput{txin}, []TXOutput{*txout}}
 	tx.ID = tx.Hash()
@@ -32,7 +32,7 @@ func TestTXOutput(t *testing.T) {
 	addr := string(wallet.GetAddress())
 
 	out := NewTXOutput(100, addr)
-	assert.Equal(t, 100, out.Value)
+	assert.Equal(t, int64(100), out.Value)
 	assert.NotEmpty(t, out.PubKeyHash)
 }
 
@@ -40,7 +40,7 @@ func TestTXInput(t *testing.T) {
 	wallet, _ := NewWallet()
 	pubKeyHash := HashPubKey(wallet.PublicKey)
 
-	in := TXInput{[]byte("id"), 0, nil, wallet.PublicKey}
+	in := TXInput{[]byte("id"), 0, nil, wallet.PublicKey, nil, false}
 	assert.True(t, in.UsesKey(pubKeyHash))
 }
 
@@ -54,7 +54,7 @@ func TestTransactionErrors(t *testing.T) {
 	assert.Error(t, err)
 
 	// Test Verify returning false on invalid prevTXs
-	valid := txn.Verify(map[string]Transaction{})
+	valid := txn.Verify(map[string]Transaction{}, 0)
 	assert.False(t, valid)
 
 	// Test DeserializeTransaction error on bad input

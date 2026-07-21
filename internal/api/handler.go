@@ -32,7 +32,7 @@ type TXInputJSON struct {
 
 // TXOutputJSON represents a JSON-friendly transaction output
 type TXOutputJSON struct {
-	Value      int    `json:"value"`
+	Value      int64  `json:"value"`
 	PubKeyHash string `json:"pubkey_hash"`
 }
 
@@ -56,7 +56,7 @@ type HeightJSON struct {
 // BalanceJSON represents a balance response
 type BalanceJSON struct {
 	Address string `json:"address"`
-	Balance int    `json:"balance"`
+	Balance int64  `json:"balance"`
 }
 
 func mapTransaction(tx *core.Transaction) TransactionJSON {
@@ -240,7 +240,7 @@ func HandleBalance(bc *core.Blockchain) http.HandlerFunc {
 			return
 		}
 
-		balance := 0
+		var balance int64 = 0
 		for _, out := range utxos {
 			balance += out.Value
 		}
